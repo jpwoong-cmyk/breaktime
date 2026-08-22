@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <title>BREAKTIME</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game"></div>
+
+  <div id="hud" aria-live="polite">
+    <div class="hud-top">
+      <div class="brand">BREAKTIME</div>
+      <div id="fps">0 FPS</div>
+    </div>
+    <div class="health-wrap">
+      <div class="health-label"><span>HEALTH</span><span id="healthText">100</span></div>
+      <div class="health-bar"><div id="healthFill"></div></div>
+    </div>
+    <div id="heldItem">EMPTY HANDS</div>
+    <div id="message"></div>
+    <div id="crosshair" aria-hidden="true"></div>
+    <div id="damageFlash" aria-hidden="true"></div>
+  </div>
+
+  <div id="startScreen" class="panel open">
+    <div class="panel-card">
+      <div class="eyebrow">NO SAVE · NO SCORE · NO CONSEQUENCES</div>
+      <h1>BREAKTIME</h1>
+      <p>Walk around. Whack passers-by. Dodge the return swing. Pick up junk and throw it into breakable stuff.</p>
+      <div class="controls-grid">
+        <div><b>Desktop</b><span>WASD move · Mouse look · Click attack/throw · E pick up · Q drop · A/D double-tap dodge</span></div>
+        <div><b>Mobile</b><span>Left thumb move · Drag right side look · Tap attack · Swipe left/right dodge · PICK UP button for objects</span></div>
+      </div>
+      <button id="startBtn">ENTER STREET</button>
+      <label class="blood-toggle"><input id="bloodToggle" type="checkbox" checked /> Stylised blood particles</label>
+    </div>
+  </div>
+
+  <div id="deathScreen" class="panel">
+    <div class="panel-card small">
+      <div class="eyebrow">YOU GOT FLOORED</div>
+      <h2>Again?</h2>
+      <p>No progress was saved. Nothing to lose. Literally.</p>
+      <button id="restartBtn">GET BACK UP</button>
+    </div>
+  </div>
+
+  <div id="mobileControls">
+    <div id="movePad" class="pad"><div id="moveKnob" class="knob"></div></div>
+    <div class="action-stack">
+      <button id="pickupBtn" class="action secondary">PICK UP</button>
+      <button id="attackBtn" class="action primary">WHACK</button>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+:root {
+  --ink: #efefe8;
+  --muted: #a6a69b;
+  --danger: #d3433e;
+  --panel: rgba(16, 16, 15, 0.94);
+  --edge: rgba(255,255,255,.14);
+}
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #111; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; touch-action: none; }
+button, input { font: inherit; }
+#game, #game canvas { width: 100%; height: 100%; display: block; }
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+.hud-top { position: absolute; top: max(16px, env(safe-area-inset-top)); left: 18px; right: 18px; display: flex; justify-content: space-between; font-size: 12px; text-shadow: 0 2px 2px #000; }
+.brand { letter-spacing: .22em; font-weight: 900; }
+#fps { color: var(--muted); }
+.health-wrap { position: absolute; left: 18px; bottom: max(18px, env(safe-area-inset-bottom)); width: min(330px, 42vw); }
+.health-label { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 11px; }
+.health-bar { height: 10px; background: rgba(0,0,0,.7); border: 1px solid rgba(255,255,255,.25); }
+#healthFill { height: 100%; width: 100%; background: #d8d8ce; transform-origin: left; }
+#heldItem { position: absolute; right: 18px; bottom: max(18px, env(safe-area-inset-bottom)); font-size: 11px; color: var(--muted); text-align: right; }
+#message { position: absolute; left: 50%; top: 58%; transform: translate(-50%, -50%); font-weight: 900; font-size: clamp(16px, 3vw, 30px); letter-spacing: .08em; text-shadow: 0 3px 0 #000; opacity: 0; transition: opacity .12s; text-align: center; }
+#message.show { opacity: 1; }
+#crosshair { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; transform: translate(-50%,-50%); }
+#crosshair::before, #crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,.86); box-shadow: 0 0 2px #000; }
+#crosshair::before { width: 12px; height: 1px; left: 2px; top: 7px; }
+#crosshair::after { width: 1px; height: 12px; left: 7px; top: 2px; }
+#damageFlash { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 35%, rgba(170,0,0,.7)); opacity: 0; transition: opacity .16s; }
+#damageFlash.on { opacity: 1; }
+.panel { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.68); display: none; place-items: center; padding: 24px; }
+.panel.open { display: grid; }
+.panel-card { width: min(690px, 100%); background: var(--panel); border: 1px solid var(--edge); box-shadow: 0 30px 80px rgba(0,0,0,.55); padding: clamp(24px, 5vw, 48px); }
+.panel-card.small { width: min(440px,100%); }
+.eyebrow { font-size: 11px; color: #b8b8ad; letter-spacing: .15em; }
+h1, h2 { margin: 8px 0 12px; letter-spacing: -.05em; line-height: .95; }
+h1 { font-size: clamp(46px, 10vw, 92px); }
+h2 { font-size: 48px; }
+p { color: #c5c5bb; line-height: 1.55; }
+.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 22px 0; }
+.controls-grid > div { border-top: 1px solid var(--edge); padding-top: 10px; }
+.controls-grid b, .controls-grid span { display: block; }
+.controls-grid span { color: #97978e; font-size: 11px; line-height: 1.55; margin-top: 5px; }
+button { border: 0; padding: 14px 18px; background: #e7e7de; color: #111; font-weight: 900; cursor: pointer; }
+button:active { transform: translateY(1px); }
+.blood-toggle { display: block; margin-top: 16px; color: #9f9f96; font-size: 11px; }
+#mobileControls { display: none; position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+.pad { position: absolute; left: 22px; bottom: max(28px, env(safe-area-inset-bottom)); width: 128px; height: 128px; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.25); border-radius: 50%; pointer-events: auto; }
+.knob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; transform: translate(-50%,-50%); border-radius: 50%; background: rgba(255,255,255,.35); }
+.action-stack { position: absolute; right: 20px; bottom: max(28px, env(safe-area-inset-bottom)); display: grid; gap: 10px; pointer-events: auto; }
+.action { width: 88px; height: 58px; padding: 0; }
+.action.primary { background: #e6e5dc; }
+.action.secondary { background: rgba(12,12,12,.78); color: #ddd; border: 1px solid rgba(255,255,255,.25); }
+@media (pointer: coarse), (max-width: 900px) {
+  #mobileControls { display: block; }
+  .health-wrap { bottom: auto; top: max(44px, calc(env(safe-area-inset-top) + 40px)); width: 180px; }
+  #heldItem { bottom: auto; top: max(44px, calc(env(safe-area-inset-top) + 40px)); }
+  .controls-grid { grid-template-columns: 1fr; }
+}
