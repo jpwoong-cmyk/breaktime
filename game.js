@@ -61,17 +61,18 @@ function addRectObstacle(x, z, width, depth, padding = 0.35) {
 
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(60, 90),
-  new THREE.MeshStandardMaterial({ color: 0x444643, roughness: 0.97 })
+  new THREE.MeshStandardMaterial({ color: 0x343634, roughness: 1 })
 );
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 world.add(floor);
 
-function box(x, y, z, w, h, d, color, group = world) {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.86 })
-  );
+function material(color, roughness = 0.86, metalness = 0) {
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness });
+}
+
+function meshFrom(geometry, x, y, z, color, group = world, roughness = 0.86, metalness = 0) {
+  const mesh = new THREE.Mesh(geometry, material(color, roughness, metalness));
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -79,66 +80,194 @@ function box(x, y, z, w, h, d, color, group = world) {
   return mesh;
 }
 
-// Pavements and road.
-box(-8, 0.08, 0, 7.5, 0.16, 90, 0x78766e);
-box(8, 0.08, 0, 7.5, 0.16, 90, 0x78766e);
-for (let z = -40; z < 40; z += 7) box(0, 0.012, z, 0.18, 0.025, 3.3, 0xd2caa4);
+function box(x, y, z, w, h, d, color, group = world, roughness = 0.86, metalness = 0) {
+  return meshFrom(new THREE.BoxGeometry(w, h, d), x, y, z, color, group, roughness, metalness);
+}
 
-const buildingColors = [0x5b5850, 0x6e675a, 0x4f5554, 0x62534c];
-for (const side of [-1, 1]) {
-  for (let i = 0; i < 7; i++) {
-    const z = -34 + i * 11.5;
-    const w = 6 + Math.random() * 4;
-    const h = 6 + Math.random() * 8;
-    const x = side * (13.2 + Math.random() * 1.2);
-    box(x, h / 2, z, w, h, 9, buildingColors[i % buildingColors.length]);
-    addRectObstacle(x, z, w, 9, 0.5);
+function cylinder(x, y, z, radiusTop, radiusBottom, height, color, group = world, segments = 8, roughness = 0.75, metalness = 0.05) {
+  return meshFrom(new THREE.CylinderGeometry(radiusTop, radiusBottom, height, segments), x, y, z, color, group, roughness, metalness);
+}
 
-    for (let wy = 2.6; wy < h - 1; wy += 2.7) {
-      for (let wx = -w / 2 + 1.4; wx < w / 2 - 1; wx += 2.3) {
-        const panel = box(x - side * 4.52, wy, z + wx, 0.08, 1.25, 1.25, 0x819394, breakableGroup);
-        panel.userData = { type: 'breakable', hp: 1, label: 'WINDOW' };
+// -----------------------------------------------------------------------------
+// Gritty low-poly street: grounded proportions, dirty concrete, hard silhouettes.
+// -----------------------------------------------------------------------------
+
+// Road, pavements and raised kerbs.
+box(0, -0.035, 0, 8.2, 0.07, 90, 0x292b2a, world, 1);
+box(-8, 0.09, 0, 7.5, 0.18, 90, 0x66645f, world, 1);
+box(8, 0.09, 0, 7.5, 0.18, 90, 0x66645f, world, 1);
+box(-4.18, 0.18, 0, 0.18, 0.22, 90, 0x89847a, world, 0.98);
+box(4.18, 0.18, 0, 0.18, 0.22, 90, 0x89847a, world, 0.98);
+
+// Faded lane markings, deliberately imperfect rather than bright arcade stripes.
+for (let z = -40; z < 40; z += 7) {
+  const stripe = box(0, 0.012, z, 0.12, 0.022, 3.0, 0xa7a18a, world, 1);
+  stripe.rotation.y = (Math.random() - 0.5) * 0.012;
+}
+
+const buildingColors = [0x4c4b47, 0x5a554d, 0x454b4a, 0x574b46, 0x555650];
+const trimColors = [0x2e302f, 0x393936, 0x302c29];
+const windowColors = [0x546267, 0x44545a, 0x66645b, 0x39484e];
+
+function makeBuilding(side, i) {
+  const z = -34 + i * 11.5;
+  const w = 6.4 + Math.random() * 3.2;
+  const h = 6.8 + Math.random() * 7.2;
+  const depth = 9;
+  const x = side * (13.0 + Math.random() * 1.0);
+  const facadeX = x - side * (depth / 2 + 0.015);
+  const wall = buildingColors[i % buildingColors.length];
+  const trim = trimColors[(i + (side > 0 ? 1 : 0)) % trimColors.length];
+
+  // Main shell plus a slightly darker ground floor. The offset blocks stop the
+  // skyline from reading as seven identical shoeboxes.
+  box(x, h / 2, z, w, h, depth, wall, world, 0.98);
+  box(facadeX - side * 0.055, 1.15, z, 0.14, 2.3, w * 0.94, trim, world, 0.96);
+
+  if (i % 3 !== 1) {
+    const upperH = 1.0 + Math.random() * 1.4;
+    const upperW = w * (0.55 + Math.random() * 0.2);
+    box(x + side * 0.15, h + upperH / 2, z + (Math.random() - 0.5) * 1.2, upperW, upperH, depth * 0.62, trim, world, 0.98);
+  }
+
+  // Roof lip / parapet.
+  box(x - side * 0.03, h + 0.18, z, w + 0.12, 0.36, depth + 0.12, trim, world, 0.95);
+
+  // Recessed-looking entrance, shallow awning and service step.
+  const doorZ = z + (i % 2 ? -w * 0.22 : w * 0.22);
+  box(facadeX - side * 0.105, 1.05, doorZ, 0.12, 1.95, 1.0, 0x242725, world, 0.8, 0.05);
+  const awning = box(facadeX - side * 0.5, 2.35, doorZ, 0.82, 0.12, 1.35, 0x343330, world, 0.8, 0.12);
+  awning.rotation.z = side * -0.08;
+  box(facadeX - side * 0.18, 0.2, doorZ, 0.34, 0.22, 1.25, 0x77736b, world, 1);
+
+  // Window rows: smaller panes with dark framing, irregular missing/dark units.
+  let windowIndex = 0;
+  for (let wy = 3.1; wy < h - 0.8; wy += 2.15) {
+    for (let wz = z - w / 2 + 1.05; wz < z + w / 2 - 0.7; wz += 1.65) {
+      if ((windowIndex + i) % 7 === 0) {
+        windowIndex++;
+        continue;
       }
+
+      box(facadeX - side * 0.075, wy, wz, 0.10, 1.05, 1.05, 0x252a2b, world, 0.88);
+      const panel = box(
+        facadeX - side * 0.135,
+        wy,
+        wz,
+        0.055,
+        0.86,
+        0.86,
+        windowColors[(windowIndex + i) % windowColors.length],
+        breakableGroup,
+        0.34,
+        0.08
+      );
+      panel.userData = { type: 'breakable', hp: 1, label: 'WINDOW' };
+      windowIndex++;
     }
   }
+
+  // Utility clutter: AC compressors and pipes make the facade less sterile.
+  if (i % 2 === 0) {
+    const acZ = z - w * 0.28;
+    box(facadeX - side * 0.34, 3.0, acZ, 0.52, 0.58, 0.78, 0x777870, world, 0.86, 0.12);
+    cylinder(facadeX - side * 0.42, 3.0, acZ, 0.23, 0.23, 0.08, 0x343735, world, 10, 0.85, 0.08).rotation.z = Math.PI / 2;
+  }
+
+  const pipeZ = z + w * 0.34;
+  cylinder(facadeX - side * 0.18, h * 0.47, pipeZ, 0.045, 0.055, Math.max(2.8, h * 0.7), 0x3d403e, world, 6, 0.65, 0.32);
+
+  addRectObstacle(x, z, w, depth, 0.5);
+}
+
+for (const side of [-1, 1]) {
+  for (let i = 0; i < 7; i++) makeBuilding(side, i);
 }
 
 function makePickup(type, x, z, color, shape = 'box', damage = 18) {
-  let geo;
-  if (shape === 'cyl') geo = new THREE.CylinderGeometry(0.16, 0.2, 0.75, 8);
-  else if (shape === 'cone') geo = new THREE.ConeGeometry(0.34, 0.9, 10);
-  else geo = new THREE.BoxGeometry(0.45, 0.32, 0.9);
+  let root;
 
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.8 }));
-  mesh.position.set(x, shape === 'cone' ? 0.45 : 0.28, z);
-  mesh.rotation.y = Math.random() * Math.PI;
-  mesh.castShadow = true;
-  mesh.userData = { type: 'pickup', label: type, damage };
-  pickupGroup.add(mesh);
-  return mesh;
+  if (type === 'BOTTLE') {
+    // Chunky glass bottle with neck and cap. Root body remains raycastable.
+    root = cylinder(x, 0.28, z, 0.13, 0.16, 0.48, color, pickupGroup, 8, 0.42, 0.04);
+    const neck = cylinder(0, 0.31, 0, 0.065, 0.085, 0.24, 0x486352, root, 8, 0.4, 0.04);
+    neck.position.y = 0.28;
+    cylinder(0, 0.43, 0, 0.07, 0.07, 0.055, 0x343935, root, 8, 0.5, 0.18);
+  } else if (type === 'BRICK') {
+    root = box(x, 0.17, z, 0.52, 0.28, 0.88, 0x7a4638, pickupGroup, 1);
+    // Mortar/groove cuts represented by dark shallow strips.
+    box(0, 0.145, 0, 0.535, 0.025, 0.04, 0x4d3029, root, 1);
+    box(0, 0.145, -0.27, 0.535, 0.025, 0.035, 0x4d3029, root, 1);
+    box(0, 0.145, 0.27, 0.535, 0.025, 0.035, 0x4d3029, root, 1);
+  } else if (type === 'CONE') {
+    // Proper traffic cone: square rubber foot, tapered body and faded band.
+    root = box(x, 0.055, z, 0.62, 0.11, 0.62, 0x292b29, pickupGroup, 0.98);
+    const cone = meshFrom(new THREE.CylinderGeometry(0.075, 0.25, 0.72, 10), 0, 0.42, 0, color, root, 0.85);
+    cone.castShadow = true;
+    cylinder(0, 0.49, 0, 0.145, 0.18, 0.13, 0xd3c9ae, root, 10, 0.8);
+  } else if (type === 'CAN') {
+    root = cylinder(x, 0.18, z, 0.12, 0.12, 0.34, 0x777b79, pickupGroup, 12, 0.34, 0.55);
+    cylinder(0, 0.175, 0, 0.103, 0.103, 0.012, 0x313432, root, 12, 0.45, 0.6);
+    const label = cylinder(0, 0, 0, 0.122, 0.122, 0.13, color, root, 12, 0.7, 0.05);
+    label.position.y = 0;
+  } else {
+    // Rough plank with a second narrow board underneath to break the perfect box silhouette.
+    root = box(x, 0.12, z, 0.22, 0.16, 1.95, 0x695441, pickupGroup, 1);
+    const splinter = box(0.08, -0.06, 0.18, 0.09, 0.08, 1.55, 0x4d4034, root, 1);
+    splinter.rotation.y = 0.045;
+  }
+
+  root.rotation.y = Math.random() * Math.PI;
+  root.castShadow = true;
+  root.userData = { type: 'pickup', label: type, damage };
+  return root;
 }
 
 const pickupDefs = [
-  ['BOTTLE', 0x54715a, 'cyl', 22],
-  ['BRICK', 0x8a5144, 'box', 30],
-  ['CONE', 0xc96334, 'cone', 18],
-  ['CAN', 0x888984, 'cyl', 14],
-  ['PLANK', 0x7d6449, 'box', 26]
+  ['BOTTLE', 0x4b6858, 'cyl', 22],
+  ['BRICK', 0x7b483b, 'box', 30],
+  ['CONE', 0xb85a2c, 'cone', 18],
+  ['CAN', 0x676f70, 'cyl', 14],
+  ['PLANK', 0x66513e, 'box', 26]
 ];
 
 for (let i = 0; i < 18; i++) {
   const d = pickupDefs[i % pickupDefs.length];
-  const p = makePickup(d[0], (Math.random() < 0.5 ? -1 : 1) * (4.8 + Math.random() * 4), -34 + Math.random() * 68, d[1], d[2], d[3]);
-  if (d[0] === 'PLANK') p.scale.set(0.45, 0.22, 2.5);
+  makePickup(d[0], (Math.random() < 0.5 ? -1 : 1) * (4.8 + Math.random() * 4), -34 + Math.random() * 68, d[1], d[2], d[3]);
+}
+
+function makeStreetPole(x, z, index) {
+  const poleGroup = new THREE.Group();
+  poleGroup.position.set(x, 0, z);
+  world.add(poleGroup);
+
+  // Heavy concrete/metal footing, tapered mast, clamp and short street-facing arm.
+  cylinder(0, 0.10, 0, 0.24, 0.29, 0.20, 0x4b4d49, poleGroup, 8, 0.95, 0.08);
+  cylinder(0, 1.08, 0, 0.055, 0.085, 1.85, 0x484b49, poleGroup, 8, 0.58, 0.55);
+  cylinder(0, 1.82, 0, 0.09, 0.09, 0.12, 0x2f3231, poleGroup, 8, 0.5, 0.58);
+
+  const arm = cylinder(0, 1.92, 0, 0.035, 0.045, 0.78, 0x464a48, poleGroup, 8, 0.52, 0.6);
+  arm.rotation.z = Math.PI / 2;
+  arm.position.x = -Math.sign(x) * 0.31;
+
+  // Breakable weathered sign panel. Keep the panel itself as the breakable root.
+  const sign = box(-Math.sign(x) * 0.18, 2.18, 0, 0.07, 0.62, 1.02, 0x696658, breakableGroup, 0.88, 0.06);
+  sign.position.x += x;
+  sign.position.z += z;
+  sign.rotation.z = (index % 3 - 1) * 0.035;
+  sign.userData = { type: 'breakable', hp: 2, label: 'SIGN' };
+
+  // Dark back plate / bracket gives the sign actual thickness from oblique angles.
+  const bracket = box(-Math.sign(x) * 0.12, 2.18, 0, 0.05, 0.16, 0.34, 0x303230, poleGroup, 0.7, 0.38);
+  bracket.rotation.x = 0.04;
+
+  addRectObstacle(x, z, 0.18, 0.18, 0.5);
 }
 
 for (let i = 0; i < 7; i++) {
   const x = (i % 2 ? -1 : 1) * 6.1;
   const z = -30 + i * 10;
-  box(x, 0.9, z, 0.12, 1.8, 0.12, 0x4d4c48);
-  addRectObstacle(x, z, 0.12, 0.12, 0.5);
-  const sign = box(x, 1.85, z, 0.15, 0.8, 1.3, 0x81755a, breakableGroup);
-  sign.userData = { type: 'breakable', hp: 2, label: 'SIGN' };
+  makeStreetPole(x, z, i);
 }
 
 const player = {
