@@ -388,11 +388,36 @@ function knockDownNPC(npc) {
   playNPCAnimation(npc, 'death', { once: true, fade: 0.08 });
 }
 
+function faceNPCToPlayer(npc, dt = 0, snap = false) {
+  if (!npc?.root) return;
+
+  const dx = camera.position.x - npc.root.position.x;
+  const dz = camera.position.z - npc.root.position.z;
+  if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return;
+
+  const targetYaw = Math.atan2(dx, dz) + MODEL_FACING_OFFSET;
+
+  if (snap || dt <= 0) {
+    npc.root.rotation.y = targetYaw;
+    return;
+  }
+
+  // Turn through the shortest angle so NPCs don't spin the long way around.
+  const current = npc.root.rotation.y;
+  const delta = Math.atan2(Math.sin(targetYaw - current), Math.cos(targetYaw - current));
+  const turnAmount = Math.min(1, dt * 14);
+  npc.root.rotation.y = current + delta * turnAmount;
+}
+
 function reactToHit(npc, stagger = 0.32) {
   npc.state = 'angry';
   npc.anger = 7;
   npc.stagger = stagger;
   npc.actionLock = stagger;
+
+  // The attacker immediately gets the NPC's attention. Movement remains locked
+  // by the hit reaction, but their body now turns toward the player at once.
+  faceNPCToPlayer(npc, 0, true);
   playNPCAnimation(npc, 'hit', { once: true, fade: 0.04 });
 }
 
@@ -551,6 +576,8 @@ function startNPCAttack(npc) {
   const options = ['punchLeft', 'punchRight', 'kickLeft', 'kickRight'].filter((name) => npc.actions[name]);
   const attackName = options.length ? options[Math.floor(Math.random() * options.length)] : 'punchRight';
 
+  // Always square up before throwing the attack.
+  faceNPCToPlayer(npc, 0, true);
   npc.actionLock = 0.48;
   playNPCAnimation(npc, attackName, { once: true, fade: 0.06 });
 
@@ -575,6 +602,10 @@ function updateNPCs(dt) {
     if (npc.actionLock > 0) {
       npc.actionLock -= dt;
       if (npc.stagger > 0) npc.stagger -= dt;
+
+      // Animation locks stop locomotion, not awareness. An angry NPC should
+      // keep turning toward the player while recoiling or swinging.
+      if (npc.state === 'angry' || npc.anger > 0) faceNPCToPlayer(npc, dt);
       continue;
     }
 
@@ -592,9 +623,12 @@ function updateNPCs(dt) {
       if (dist > 1.42) {
         const v = toPlayer.normalize();
         root.position.addScaledVector(v, npc.speed * 1.8 * dt);
-        root.rotation.y = Math.atan2(v.x, v.z) + MODEL_FACING_OFFSET;
+        faceNPCToPlayer(npc, dt);
         playNPCAnimation(npc, 'run');
       } else {
+        // Keep tracking the player at melee range so circling around an NPC
+        // doesn't leave them attacking empty air while facing the old angle.
+        faceNPCToPlayer(npc, dt);
         npc.attackTimer -= dt;
         if (npc.attackTimer <= 0) {
           npc.attackTimer = 0.85 + Math.random() * 0.6;
