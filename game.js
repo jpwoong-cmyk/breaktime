@@ -112,50 +112,183 @@ function cylinder(x, y, z, radiusTop, radiusBottom, height, color, group = world
 }
 
 // -----------------------------------------------------------------------------
-// CS-like first-person hands. Lightweight low-poly geometry, parented directly
-// to the camera so it behaves as a proper viewmodel.
+// Procedural first-person arms/hands.
+// Built entirely from Three.js geometry so BREAKTIME does not need a hand GLTF.
+// The silhouette is intentionally low-poly/PS2-ish, but anatomical enough that
+// it reads as a hand instead of a camera-attached rubber block.
 // -----------------------------------------------------------------------------
 const viewModel = new THREE.Group();
 viewModel.position.set(0, 0, 0);
 camera.add(viewModel);
 
-const skinMat = new THREE.MeshStandardMaterial({ color: 0xb98768, roughness: 0.82 });
-const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x232624, roughness: 0.96 });
+const skinMat = new THREE.MeshStandardMaterial({
+  color: 0xb98566,
+  roughness: 0.9,
+  metalness: 0
+});
+const skinShadowMat = new THREE.MeshStandardMaterial({
+  color: 0x9d6d55,
+  roughness: 0.94,
+  metalness: 0
+});
+const sleeveMat = new THREE.MeshStandardMaterial({
+  color: 0x242725,
+  roughness: 1
+});
+
+function vmMesh(geometry, material, parent) {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  parent.add(mesh);
+  return mesh;
+}
+
+function makeFinger(parent, x, y, z, scale = 1) {
+  const root = new THREE.Group();
+  root.position.set(x, y, z);
+  parent.add(root);
+
+  const proximal = vmMesh(
+    new THREE.CapsuleGeometry(0.022 * scale, 0.052 * scale, 3, 5),
+    skinMat,
+    root
+  );
+  proximal.rotation.x = Math.PI / 2;
+  proximal.position.z = -0.027 * scale;
+
+  const tipJoint = new THREE.Group();
+  tipJoint.position.z = -0.072 * scale;
+  root.add(tipJoint);
+
+  const distal = vmMesh(
+    new THREE.CapsuleGeometry(0.020 * scale, 0.043 * scale, 3, 5),
+    skinMat,
+    tipJoint
+  );
+  distal.rotation.x = Math.PI / 2;
+  distal.position.z = -0.021 * scale;
+
+  root.userData.tipJoint = tipJoint;
+  return root;
+}
 
 function makeViewArm(side) {
-  const arm = new THREE.Group();
   const sx = side;
-
-  const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.105, 0.52, 7), sleeveMat);
-  sleeve.rotation.z = sx * -0.32;
-  sleeve.rotation.x = -1.20;
-  sleeve.position.set(sx * 0.30, -0.31, -0.54);
-  sleeve.castShadow = false;
-  arm.add(sleeve);
-
-  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.13, 0.20), skinMat);
-  hand.position.set(sx * 0.22, -0.26, -0.80);
-  hand.rotation.set(-0.10, sx * -0.08, sx * -0.10);
-  hand.castShadow = false;
-  arm.add(hand);
-
-  // Crude knuckles sell the fist silhouette without expensive geometry.
-  for (let i = 0; i < 3; i++) {
-    const knuckle = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 4), skinMat);
-    knuckle.position.set(sx * (0.17 + i * 0.035), -0.205, -0.885 + i * 0.006);
-    arm.add(knuckle);
-  }
-
+  const arm = new THREE.Group();
+  arm.position.set(sx * 0.30, -0.37, -0.37);
   viewModel.add(arm);
+
+  // Sleeve/forearm. The taper is wider toward the camera and narrows at wrist.
+  const sleeve = vmMesh(
+    new THREE.CylinderGeometry(0.082, 0.115, 0.46, 8),
+    sleeveMat,
+    arm
+  );
+  sleeve.rotation.x = Math.PI / 2;
+  sleeve.position.set(sx * 0.015, -0.01, 0.03);
+
+  const forearm = vmMesh(
+    new THREE.CylinderGeometry(0.062, 0.078, 0.21, 8),
+    skinMat,
+    arm
+  );
+  forearm.rotation.x = Math.PI / 2;
+  forearm.position.set(sx * -0.005, -0.004, -0.285);
+
+  const wrist = vmMesh(
+    new THREE.CylinderGeometry(0.057, 0.063, 0.075, 8),
+    skinShadowMat,
+    arm
+  );
+  wrist.rotation.x = Math.PI / 2;
+  wrist.position.z = -0.41;
+
+  const handRoot = new THREE.Group();
+  handRoot.position.set(sx * -0.006, 0.0, -0.47);
+  arm.add(handRoot);
+
+  // Rounded low-poly palm. Scaled sphere avoids the old rectangular mitten.
+  const palm = vmMesh(
+    new THREE.SphereGeometry(0.105, 8, 6),
+    skinMat,
+    handRoot
+  );
+  palm.scale.set(0.92, 0.58, 1.22);
+  palm.position.z = -0.055;
+
+  // Back-of-hand ridge gives the silhouette some structure.
+  const handRidge = vmMesh(
+    new THREE.SphereGeometry(0.072, 7, 5),
+    skinShadowMat,
+    handRoot
+  );
+  handRidge.scale.set(1.0, 0.28, 0.70);
+  handRidge.position.set(0, 0.047, -0.072);
+
+  const fingerXs = [-0.064, -0.022, 0.022, 0.064];
+  const fingers = fingerXs.map((fx, i) =>
+    makeFinger(handRoot, fx, -0.005, -0.125, 1 - i * 0.025)
+  );
+
+  // Thumb is angled across the fist instead of pretending to be a fifth finger.
+  const thumbRoot = new THREE.Group();
+  thumbRoot.position.set(sx * 0.093, -0.018, -0.055);
+  thumbRoot.rotation.z = sx * -0.72;
+  thumbRoot.rotation.y = sx * -0.26;
+  handRoot.add(thumbRoot);
+
+  const thumb = vmMesh(
+    new THREE.CapsuleGeometry(0.025, 0.066, 3, 5),
+    skinMat,
+    thumbRoot
+  );
+  thumb.rotation.x = Math.PI / 2;
+  thumb.position.z = -0.033;
+
+  // Low-poly knuckle caps, subtle rather than three giant beads.
+  fingerXs.forEach((fx) => {
+    const knuckle = vmMesh(
+      new THREE.SphereGeometry(0.027, 6, 4),
+      skinShadowMat,
+      handRoot
+    );
+    knuckle.scale.set(1.0, 0.72, 0.92);
+    knuckle.position.set(fx, 0.054, -0.122);
+  });
+
+  arm.userData.handRoot = handRoot;
+  arm.userData.fingers = fingers;
+  arm.userData.thumbRoot = thumbRoot;
+  arm.userData.side = side;
   return arm;
 }
 
 const leftViewArm = makeViewArm(-1);
 const rightViewArm = makeViewArm(1);
+let nextPunchSide = 1;
+
+function setFingerCurl(arm, curl) {
+  const c = THREE.MathUtils.clamp(curl, 0, 1);
+  for (const finger of arm.userData.fingers) {
+    finger.rotation.x = -0.18 - c * 1.12;
+    finger.userData.tipJoint.rotation.x = -0.08 - c * 1.18;
+  }
+  arm.userData.thumbRoot.rotation.x = -0.15 - c * 0.38;
+  arm.userData.thumbRoot.rotation.y =
+    arm.userData.side * (-0.20 - c * 0.30);
+}
 
 function startHandSwing(kind = 'punch') {
   player.handSwing = 1;
   player.handSwingKind = kind;
+
+  if (kind === 'punch') {
+    player.handSide = nextPunchSide;
+    nextPunchSide *= -1;
+  } else {
+    player.handSide = 1;
+  }
 }
 
 function impactKick(strength = 1) {
@@ -167,29 +300,70 @@ function impactKick(strength = 1) {
 }
 
 function updateViewModel(dt) {
-  const walkBob = running ? Math.sin(performance.now() * 0.008) * 0.008 : 0;
-  viewModel.position.y = walkBob;
+  const now = performance.now();
+  const walkBob = running ? Math.sin(now * 0.008) * 0.008 : 0;
+  const walkSway = running ? Math.sin(now * 0.004) * 0.012 : 0;
+
+  viewModel.position.y = walkBob + (player.held ? -0.022 : 0);
+  viewModel.position.x = walkSway * 0.35;
+  viewModel.rotation.z = -walkSway * 0.20;
 
   if (player.handSwing > 0) {
-    player.handSwing = Math.max(0, player.handSwing - dt * (player.handSwingKind === 'weapon' ? 4.8 : 6.6));
+    player.handSwing = Math.max(
+      0,
+      player.handSwing - dt * (player.handSwingKind === 'weapon' ? 4.8 : 6.3)
+    );
   }
 
-  const t = 1 - player.handSwing;
   const active = player.handSwing > 0;
-  const punchArc = active ? Math.sin(Math.min(1, t) * Math.PI) : 0;
-  const recover = active ? Math.sin(Math.min(1, t) * Math.PI * 0.5) : 0;
+  const progress = 1 - player.handSwing;
+  const strike = active ? Math.sin(Math.min(1, progress) * Math.PI) : 0;
+  const snap = active ? Math.sin(Math.min(1, progress) * Math.PI * 0.72) : 0;
 
-  // Alternate fist emphasis based on attack type. Weapon swings keep the left
-  // hand braced while the right hand drives forward.
-  rightViewArm.position.set(0, 0, active ? -0.34 * punchArc : 0);
-  rightViewArm.rotation.x = active ? -0.78 * punchArc : 0;
-  rightViewArm.rotation.z = active ? -0.38 * punchArc : 0;
-  leftViewArm.position.set(0, 0, active && player.handSwingKind === 'punch' ? -0.12 * recover : 0);
-  leftViewArm.rotation.z = active && player.handSwingKind === 'punch' ? 0.20 * recover : 0;
+  const punchingRight = player.handSide !== -1;
+  const attackArm = punchingRight ? rightViewArm : leftViewArm;
+  const supportArm = punchingRight ? leftViewArm : rightViewArm;
 
-  // Pull hands down slightly while holding a world-space weapon so the prop
-  // remains readable instead of being buried inside the fists.
-  viewModel.position.y += player.held ? -0.025 : 0;
+  // Reset both anchors every frame so the animation never accumulates drift.
+  leftViewArm.position.set(-0.30, -0.37, -0.37);
+  rightViewArm.position.set(0.30, -0.37, -0.37);
+  leftViewArm.rotation.set(0.03, 0.09, -0.07);
+  rightViewArm.rotation.set(0.03, -0.09, 0.07);
+
+  // Relaxed fingers are never perfectly straight. Holding an object closes
+  // both hands more firmly, while a punch clenches the striking fist fully.
+  const restingCurl = player.held ? 0.83 : 0.34;
+  setFingerCurl(leftViewArm, restingCurl);
+  setFingerCurl(rightViewArm, restingCurl);
+
+  if (active && player.handSwingKind === 'punch') {
+    setFingerCurl(attackArm, 1);
+
+    // Punch travels forward, slightly inward, with shoulder roll and wrist turn.
+    attackArm.position.z -= 0.34 * strike;
+    attackArm.position.y += 0.065 * strike;
+    attackArm.position.x += -attackArm.userData.side * 0.075 * strike;
+    attackArm.rotation.x = -0.50 * strike;
+    attackArm.rotation.y += attackArm.userData.side * 0.17 * strike;
+    attackArm.rotation.z += -attackArm.userData.side * 0.32 * snap;
+
+    // The other hand stays up like a crude guard rather than mirroring the hit.
+    supportArm.position.z -= 0.055 * strike;
+    supportArm.position.y += 0.018 * strike;
+    setFingerCurl(supportArm, 0.70);
+  } else if (active && player.handSwingKind === 'weapon') {
+    // Weapon swing is driven by the right arm: cock back, cut across, recover.
+    setFingerCurl(rightViewArm, 0.95);
+    rightViewArm.position.z -= 0.17 * strike;
+    rightViewArm.position.y += 0.07 * strike;
+    rightViewArm.position.x -= 0.09 * strike;
+    rightViewArm.rotation.x = -0.58 * strike;
+    rightViewArm.rotation.y = -0.40 * strike;
+    rightViewArm.rotation.z = -0.72 * snap;
+
+    leftViewArm.position.z -= 0.035 * strike;
+    setFingerCurl(leftViewArm, 0.62);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -399,6 +573,7 @@ const player = {
   alive: true,
   handSwing: 0,
   handSwingKind: 'punch',
+  handSide: 1,
   hitStop: 0
 };
 
