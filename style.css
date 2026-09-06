@@ -40,6 +40,7 @@ p { color: #c5c5bb; line-height: 1.55; }
 .controls-grid b, .controls-grid span { display: block; }
 .controls-grid span { color: #97978e; font-size: 11px; line-height: 1.55; margin-top: 5px; }
 button { border: 0; padding: 14px 18px; background: #e7e7de; color: #111; font-weight: 900; cursor: pointer; }
+button:disabled { cursor: default; opacity: .6; }
 button:active { transform: translateY(1px); }
 .blood-toggle { display: block; margin-top: 16px; color: #9f9f96; font-size: 11px; }
 #mobileControls { display: none; position: fixed; inset: 0; z-index: 20; pointer-events: none; }

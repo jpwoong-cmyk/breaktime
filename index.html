@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
   <title>BREAKTIME</title>
   <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <div id="game"></div>
@@ -33,7 +41,7 @@
         <div><b>Desktop</b><span>WASD move · Mouse look · Click attack/throw · E pick up · Q drop · A/D double-tap dodge</span></div>
         <div><b>Mobile</b><span>Left thumb move · Drag right side look · Tap attack · Swipe left/right dodge · PICK UP button for objects</span></div>
       </div>
-      <button id="startBtn">ENTER STREET</button>
+      <button id="startBtn" disabled>LOADING PEOPLE...</button>
       <label class="blood-toggle"><input id="bloodToggle" type="checkbox" checked /> Stylised blood particles</label>
     </div>
   </div>
