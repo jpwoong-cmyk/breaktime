@@ -444,12 +444,21 @@ function playNPCAnimation(npc, name, { once = false, fade = 0.12 } = {}) {
   npc.activeAnimation = name;
 }
 
+const SIDEWALK_TOP_Y = 0.18;
+const ROAD_TOP_Y = 0;
+
+function groundHeightAt(x) {
+  // Sidewalk slabs run outside the kerbs. NPC feet must stand on the slab top,
+  // not at world Y=0 underneath it. The road remains at Y=0.
+  return Math.abs(x) >= 4.18 ? SIDEWALK_TOP_Y : ROAD_TOP_Y;
+}
+
 function makeNPC(x, z, variant = 0) {
   const source = characterSources[variant % characterSources.length];
   if (!source) return null;
 
   const root = new THREE.Group();
-  root.position.set(x, 0, z);
+  root.position.set(x, groundHeightAt(x), z);
   root.rotation.y = MODEL_FACING_OFFSET;
 
   const visual = cloneSkeleton(source.scene);
@@ -865,6 +874,12 @@ function updateNPCs(dt) {
 
     npc.mixer.update(dt);
     if (npc.state === 'down') continue;
+
+    // Keep the soles planted on whichever surface the NPC is crossing.
+    // This also lets an angry NPC step down from pavement to road instead of
+    // floating or sinking when their X position changes.
+    const targetGroundY = groundHeightAt(root.position.x);
+    root.position.y = THREE.MathUtils.lerp(root.position.y, targetGroundY, Math.min(1, dt * 18));
 
     if (npc.actionLock > 0) {
       npc.actionLock -= dt;
