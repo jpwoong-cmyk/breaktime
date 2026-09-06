@@ -184,90 +184,48 @@ for (const side of [-1, 1]) {
   for (let i = 0; i < 7; i++) makeBuilding(side, i);
 }
 
-function makePickup(type, x, z, color, shape = 'box', damage = 18) {
-  let root;
 
-  if (type === 'BOTTLE') {
-    // Chunky glass bottle with neck and cap. Root body remains raycastable.
-    root = cylinder(x, 0.28, z, 0.13, 0.16, 0.48, color, pickupGroup, 8, 0.42, 0.04);
-    const neck = cylinder(0, 0.31, 0, 0.065, 0.085, 0.24, 0x486352, root, 8, 0.4, 0.04);
-    neck.position.y = 0.28;
-    cylinder(0, 0.43, 0, 0.07, 0.07, 0.055, 0x343935, root, 8, 0.5, 0.18);
-  } else if (type === 'BRICK') {
-    root = box(x, 0.17, z, 0.52, 0.28, 0.88, 0x7a4638, pickupGroup, 1);
-    // Mortar/groove cuts represented by dark shallow strips.
-    box(0, 0.145, 0, 0.535, 0.025, 0.04, 0x4d3029, root, 1);
-    box(0, 0.145, -0.27, 0.535, 0.025, 0.035, 0x4d3029, root, 1);
-    box(0, 0.145, 0.27, 0.535, 0.025, 0.035, 0x4d3029, root, 1);
-  } else if (type === 'CONE') {
-    // Proper traffic cone: square rubber foot, tapered body and faded band.
-    root = box(x, 0.055, z, 0.62, 0.11, 0.62, 0x292b29, pickupGroup, 0.98);
-    const cone = meshFrom(new THREE.CylinderGeometry(0.075, 0.25, 0.72, 10), 0, 0.42, 0, color, root, 0.85);
-    cone.castShadow = true;
-    cylinder(0, 0.49, 0, 0.145, 0.18, 0.13, 0xd3c9ae, root, 10, 0.8);
-  } else if (type === 'CAN') {
-    root = cylinder(x, 0.18, z, 0.12, 0.12, 0.34, 0x777b79, pickupGroup, 12, 0.34, 0.55);
-    cylinder(0, 0.175, 0, 0.103, 0.103, 0.012, 0x313432, root, 12, 0.45, 0.6);
-    const label = cylinder(0, 0, 0, 0.122, 0.122, 0.13, color, root, 12, 0.7, 0.05);
-    label.position.y = 0;
-  } else {
-    // Rough plank with a second narrow board underneath to break the perfect box silhouette.
-    root = box(x, 0.12, z, 0.22, 0.16, 1.95, 0x695441, pickupGroup, 1);
-    const splinter = box(0.08, -0.06, 0.18, 0.09, 0.08, 1.55, 0x4d4034, root, 1);
-    splinter.rotation.y = 0.045;
-  }
+// -----------------------------------------------------------------------------
+// Roadside lighting.
+// All loose street clutter has been removed. Buildings remain, and these lamps
+// are the only freestanding street furniture.
+// -----------------------------------------------------------------------------
 
-  root.rotation.y = Math.random() * Math.PI;
-  root.castShadow = true;
-  root.userData = { type: 'pickup', label: type, damage };
-  return root;
-}
+function makeLampPost(x, z, side, index) {
+  const lamp = new THREE.Group();
+  lamp.position.set(x, 0, z);
+  world.add(lamp);
 
-const pickupDefs = [
-  ['BOTTLE', 0x4b6858, 'cyl', 22],
-  ['BRICK', 0x7b483b, 'box', 30],
-  ['CONE', 0xb85a2c, 'cone', 18],
-  ['CAN', 0x676f70, 'cyl', 14],
-  ['PLANK', 0x66513e, 'box', 26]
-];
+  // Concrete footing and slightly tapered steel mast.
+  cylinder(0, 0.10, 0, 0.22, 0.27, 0.20, 0x575954, lamp, 8, 0.95, 0.08);
+  cylinder(0, 1.75, 0, 0.055, 0.085, 3.35, 0x3f4442, lamp, 8, 0.56, 0.62);
 
-for (let i = 0; i < 18; i++) {
-  const d = pickupDefs[i % pickupDefs.length];
-  makePickup(d[0], (Math.random() < 0.5 ? -1 : 1) * (4.8 + Math.random() * 4), -34 + Math.random() * 68, d[1], d[2], d[3]);
-}
-
-function makeStreetPole(x, z, index) {
-  const poleGroup = new THREE.Group();
-  poleGroup.position.set(x, 0, z);
-  world.add(poleGroup);
-
-  // Heavy concrete/metal footing, tapered mast, clamp and short street-facing arm.
-  cylinder(0, 0.10, 0, 0.24, 0.29, 0.20, 0x4b4d49, poleGroup, 8, 0.95, 0.08);
-  cylinder(0, 1.08, 0, 0.055, 0.085, 1.85, 0x484b49, poleGroup, 8, 0.58, 0.55);
-  cylinder(0, 1.82, 0, 0.09, 0.09, 0.12, 0x2f3231, poleGroup, 8, 0.5, 0.58);
-
-  const arm = cylinder(0, 1.92, 0, 0.035, 0.045, 0.78, 0x464a48, poleGroup, 8, 0.52, 0.6);
+  // Short road-facing arm. side = -1 on left pavement, +1 on right.
+  const arm = cylinder(0, 3.26, 0, 0.04, 0.05, 0.86, 0x3f4442, lamp, 8, 0.54, 0.64);
   arm.rotation.z = Math.PI / 2;
-  arm.position.x = -Math.sign(x) * 0.31;
+  arm.position.x = -side * 0.37;
 
-  // Breakable weathered sign panel. Keep the panel itself as the breakable root.
-  const sign = box(-Math.sign(x) * 0.18, 2.18, 0, 0.07, 0.62, 1.02, 0x696658, breakableGroup, 0.88, 0.06);
-  sign.position.x += x;
-  sign.position.z += z;
-  sign.rotation.z = (index % 3 - 1) * 0.035;
-  sign.userData = { type: 'breakable', hp: 2, label: 'SIGN' };
+  // Low-poly luminaire with a dull warm lens.
+  const housing = box(-side * 0.76, 3.24, 0, 0.50, 0.13, 0.27, 0x2c302f, lamp, 0.58, 0.55);
+  housing.rotation.z = side * 0.035;
+  box(-side * 0.76, 3.17, 0, 0.38, 0.035, 0.20, 0xb9a66f, lamp, 0.5, 0.1);
 
-  // Dark back plate / bracket gives the sign actual thickness from oblique angles.
-  const bracket = box(-Math.sign(x) * 0.12, 2.18, 0, 0.05, 0.16, 0.34, 0x303230, poleGroup, 0.7, 0.38);
-  bracket.rotation.x = 0.04;
+  // Small inspection collar breaks the perfectly straight silhouette.
+  cylinder(0, 0.55, 0, 0.095, 0.095, 0.16, 0x303432, lamp, 8, 0.62, 0.5);
 
-  addRectObstacle(x, z, 0.18, 0.18, 0.5);
+  // Slight imperfection so the row does not feel copy-pasted.
+  lamp.rotation.y = ((index % 3) - 1) * 0.012;
+
+  addRectObstacle(x, z, 0.22, 0.22, 0.48);
 }
 
-for (let i = 0; i < 7; i++) {
-  const x = (i % 2 ? -1 : 1) * 6.1;
-  const z = -30 + i * 10;
-  makeStreetPole(x, z, i);
+// Place lamps exactly along the road/pavement boundary, but slightly onto the
+// pavement so they do not sit in the driving lane.
+for (const side of [-1, 1]) {
+  for (let i = 0; i < 8; i++) {
+    const z = -35 + i * 10;
+    makeLampPost(side * 4.48, z, side, i);
+  }
 }
 
 const player = {
@@ -385,7 +343,7 @@ async function loadCharacters() {
     return;
   }
 
-  spawnNPCPopulation(13);
+  spawnNPCPopulation(8);
   startBtn.disabled = false;
   startBtn.textContent = 'ENTER STREET';
 }
@@ -510,14 +468,60 @@ function makeNPC(x, z, variant = 0) {
   return root;
 }
 
+
+const NPC_DESPAWN_Z = 47;
+const NPC_SPAWN_Z = 45.5;
+const NPC_MAX_POPULATION = 14;
+let npcSpawnTimer = 1.5 + Math.random() * 2.5;
+
+function randomSidewalkLane() {
+  const side = Math.random() < 0.5 ? -1 : 1;
+  return side * (5.1 + Math.random() * 3.2);
+}
+
 function spawnNPCPopulation(count) {
   for (let i = 0; i < count; i++) {
-    makeNPC(
-      (Math.random() < 0.5 ? -1 : 1) * (3.5 + Math.random() * 5),
-      -35 + Math.random() * 70,
-      i
-    );
+    const x = randomSidewalkLane();
+    const root = makeNPC(x, -31 + Math.random() * 62, i);
+    if (!root) continue;
+    // Initial crowd can already be travelling either direction.
+    root.userData.dir = Math.random() < 0.5 ? 1 : -1;
+    root.userData.laneX = x;
   }
+}
+
+function spawnFlowNPC() {
+  if (!characterSources.length || npcGroup.children.length >= NPC_MAX_POPULATION) return;
+
+  const enterFromNorth = Math.random() < 0.5;
+  const z = enterFromNorth ? -NPC_SPAWN_Z : NPC_SPAWN_Z;
+  const x = randomSidewalkLane();
+  const variant = Math.floor(Math.random() * characterSources.length);
+  const root = makeNPC(x, z, variant);
+  if (!root) return;
+
+  // Walk through the scene rather than spawning and turning around.
+  root.userData.dir = enterFromNorth ? 1 : -1;
+  root.userData.laneX = x;
+}
+
+function removeNPC(root) {
+  const npc = root?.userData;
+  if (npc?.mixer) {
+    npc.mixer.stopAllAction();
+    npc.mixer.uncacheRoot(npc.visual);
+  }
+  npcGroup.remove(root);
+}
+
+function updateNPCSpawner(dt) {
+  npcSpawnTimer -= dt;
+  if (npcSpawnTimer > 0) return;
+
+  // RNG cadence. Sometimes the pavement stays quiet for a few seconds,
+  // sometimes another pedestrian enters quickly after the previous one.
+  npcSpawnTimer = 1.4 + Math.random() * 4.8;
+  if (npcGroup.children.length < NPC_MAX_POPULATION) spawnFlowNPC();
 }
 
 function findNPCData(obj) {
@@ -730,18 +734,10 @@ function pointInsideStaticObstacle(x, z, radius = 0.36) {
   return false;
 }
 
+
 function dynamicObstacleAt(x, z, radius = 0.36) {
-  // Loose street items and breakable signs should feel solid to pedestrians.
-  for (const obj of pickupGroup.children) {
-    const extra = obj.userData?.label === 'PLANK' ? 0.65 : 0.42;
-    if (Math.hypot(x - obj.position.x, z - obj.position.z) < radius + extra) return true;
-  }
-  for (const obj of breakableGroup.children) {
-    // Windows live on the building facade and are already covered by the
-    // building collider. Small sign panels still count as street obstacles.
-    if (obj.userData?.label !== 'SIGN') continue;
-    if (Math.hypot(x - obj.position.x, z - obj.position.z) < radius + 0.52) return true;
-  }
+  // No loose street objects remain. NPC-vs-NPC spacing is handled separately
+  // by crowdRepulsion(), while buildings and lampposts live in staticObstacles.
   return false;
 }
 
@@ -923,10 +919,15 @@ function updateNPCs(dt) {
 
       if (npc.anger <= 0 && dist > 6) npc.state = 'wander';
     } else {
-      if (root.position.z > 39 || root.position.z < -39) npc.dir *= -1;
+      // Pedestrians continue beyond the visible street instead of bouncing at
+      // an invisible wall. Once outside the space, remove them completely.
+      if (Math.abs(root.position.z) > NPC_DESPAWN_Z) {
+        removeNPC(root);
+        continue;
+      }
 
-      // Walk generally along the street, but softly return to the NPC's
-      // original lane after detouring around clutter.
+      // Walk generally along the street, softly returning to the assigned
+      // pavement lane after detouring around another person or a lamppost.
       const laneCorrection = THREE.MathUtils.clamp((npc.laneX - root.position.x) * 0.45, -0.7, 0.7);
       const desired = new THREE.Vector3(laneCorrection, 0, npc.dir).normalize();
       const movement = moveNPC(npc, desired, npc.speed, dt);
@@ -1187,6 +1188,7 @@ function loop(now) {
 
   if (running) {
     updatePlayer(dt);
+    updateNPCSpawner(dt);
     updateNPCs(dt);
     updateThrown(dt);
     updateEffects(dt);
