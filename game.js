@@ -26,6 +26,29 @@ scene.fog = new THREE.Fog(0x8c887d, 18, 62);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.08, 100);
 camera.position.set(0, 1.68, 8);
+scene.add(camera);
+
+// -----------------------------------------------------------------------------
+// First-person feedback layer. Created from JS so game.js remains the only
+// changed file. No extra HTML/CSS assets are required.
+// -----------------------------------------------------------------------------
+const feedbackStyle = document.createElement('style');
+feedbackStyle.textContent = `
+  #lowHealthFX,#impactFX{position:fixed;inset:0;pointer-events:none;z-index:28}
+  #lowHealthFX{opacity:0;background:radial-gradient(circle at center,transparent 42%,rgba(105,0,0,.16) 66%,rgba(55,0,0,.78) 100%);mix-blend-mode:multiply}
+  #lowHealthFX.critical{animation:btPulse .82s ease-in-out infinite}
+  #impactFX{opacity:0;background:radial-gradient(circle at center,rgba(255,245,220,.22) 0,rgba(190,25,10,.10) 20%,transparent 52%)}
+  #impactFX.pop{animation:btImpact .16s ease-out}
+  @keyframes btImpact{0%{opacity:.95;transform:scale(.985)}100%{opacity:0;transform:scale(1.035)}}
+  @keyframes btPulse{0%,100%{filter:brightness(.9);transform:scale(1)}50%{filter:brightness(1.14);transform:scale(1.012)}}
+`;
+document.head.appendChild(feedbackStyle);
+const lowHealthFX = document.createElement('div');
+lowHealthFX.id = 'lowHealthFX';
+document.body.appendChild(lowHealthFX);
+const impactFX = document.createElement('div');
+impactFX.id = 'impactFX';
+document.body.appendChild(impactFX);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
@@ -86,6 +109,87 @@ function box(x, y, z, w, h, d, color, group = world, roughness = 0.86, metalness
 
 function cylinder(x, y, z, radiusTop, radiusBottom, height, color, group = world, segments = 8, roughness = 0.75, metalness = 0.05) {
   return meshFrom(new THREE.CylinderGeometry(radiusTop, radiusBottom, height, segments), x, y, z, color, group, roughness, metalness);
+}
+
+// -----------------------------------------------------------------------------
+// CS-like first-person hands. Lightweight low-poly geometry, parented directly
+// to the camera so it behaves as a proper viewmodel.
+// -----------------------------------------------------------------------------
+const viewModel = new THREE.Group();
+viewModel.position.set(0, 0, 0);
+camera.add(viewModel);
+
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xb98768, roughness: 0.82 });
+const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x232624, roughness: 0.96 });
+
+function makeViewArm(side) {
+  const arm = new THREE.Group();
+  const sx = side;
+
+  const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.105, 0.52, 7), sleeveMat);
+  sleeve.rotation.z = sx * -0.32;
+  sleeve.rotation.x = -1.20;
+  sleeve.position.set(sx * 0.30, -0.31, -0.54);
+  sleeve.castShadow = false;
+  arm.add(sleeve);
+
+  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.13, 0.20), skinMat);
+  hand.position.set(sx * 0.22, -0.26, -0.80);
+  hand.rotation.set(-0.10, sx * -0.08, sx * -0.10);
+  hand.castShadow = false;
+  arm.add(hand);
+
+  // Crude knuckles sell the fist silhouette without expensive geometry.
+  for (let i = 0; i < 3; i++) {
+    const knuckle = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 4), skinMat);
+    knuckle.position.set(sx * (0.17 + i * 0.035), -0.205, -0.885 + i * 0.006);
+    arm.add(knuckle);
+  }
+
+  viewModel.add(arm);
+  return arm;
+}
+
+const leftViewArm = makeViewArm(-1);
+const rightViewArm = makeViewArm(1);
+
+function startHandSwing(kind = 'punch') {
+  player.handSwing = 1;
+  player.handSwingKind = kind;
+}
+
+function impactKick(strength = 1) {
+  player.shake = Math.max(player.shake, 0.055 * strength);
+  player.hitStop = Math.max(player.hitStop, 0.025 + 0.018 * strength);
+  impactFX.classList.remove('pop');
+  void impactFX.offsetWidth;
+  impactFX.classList.add('pop');
+}
+
+function updateViewModel(dt) {
+  const walkBob = running ? Math.sin(performance.now() * 0.008) * 0.008 : 0;
+  viewModel.position.y = walkBob;
+
+  if (player.handSwing > 0) {
+    player.handSwing = Math.max(0, player.handSwing - dt * (player.handSwingKind === 'weapon' ? 4.8 : 6.6));
+  }
+
+  const t = 1 - player.handSwing;
+  const active = player.handSwing > 0;
+  const punchArc = active ? Math.sin(Math.min(1, t) * Math.PI) : 0;
+  const recover = active ? Math.sin(Math.min(1, t) * Math.PI * 0.5) : 0;
+
+  // Alternate fist emphasis based on attack type. Weapon swings keep the left
+  // hand braced while the right hand drives forward.
+  rightViewArm.position.set(0, 0, active ? -0.34 * punchArc : 0);
+  rightViewArm.rotation.x = active ? -0.78 * punchArc : 0;
+  rightViewArm.rotation.z = active ? -0.38 * punchArc : 0;
+  leftViewArm.position.set(0, 0, active && player.handSwingKind === 'punch' ? -0.12 * recover : 0);
+  leftViewArm.rotation.z = active && player.handSwingKind === 'punch' ? 0.20 * recover : 0;
+
+  // Pull hands down slightly while holding a world-space weapon so the prop
+  // remains readable instead of being buried inside the fists.
+  viewModel.position.y += player.held ? -0.025 : 0;
 }
 
 // -----------------------------------------------------------------------------
@@ -292,7 +396,10 @@ const player = {
   dodgeTime: 0,
   dodgeDir: 0,
   shake: 0,
-  alive: true
+  alive: true,
+  handSwing: 0,
+  handSwingKind: 'punch',
+  hitStop: 0
 };
 
 const keys = new Set();
@@ -320,6 +427,13 @@ function setHealth(v) {
   player.health = Math.max(0, Math.min(100, v));
   healthFill.style.width = `${player.health}%`;
   healthText.textContent = Math.ceil(player.health);
+
+  // Peripheral warning grows smoothly as health drops. Below 25 HP it pulses
+  // so danger is readable without staring at the number.
+  const danger = THREE.MathUtils.clamp((55 - player.health) / 55, 0, 1);
+  lowHealthFX.style.opacity = (danger * 0.88).toFixed(2);
+  lowHealthFX.classList.toggle('critical', player.health > 0 && player.health <= 25);
+
   if (player.health <= 0) die();
 }
 
@@ -666,6 +780,56 @@ function bloodBurst(pos) {
   }
 }
 
+const bloodPuddles = [];
+function makeBloodPuddle(npc, strength = 1) {
+  if (!bloodToggle.checked || !npc?.root) return;
+
+  const groundY = groundHeightAt(npc.root.position.x) + 0.006;
+  const puddle = new THREE.Mesh(
+    new THREE.CircleGeometry(0.34 + Math.random() * 0.22, 14),
+    new THREE.MeshBasicMaterial({
+      color: 0x5a0707,
+      transparent: true,
+      opacity: 0.74,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2
+    })
+  );
+  puddle.rotation.x = -Math.PI / 2;
+  puddle.rotation.z = Math.random() * Math.PI;
+  puddle.scale.set(0.65 + Math.random() * 0.7, 0.80 + Math.random() * 0.65, 1);
+  puddle.position.set(
+    npc.root.position.x + (Math.random() - 0.5) * 0.18,
+    groundY,
+    npc.root.position.z + (Math.random() - 0.5) * 0.18
+  );
+  puddle.userData.puddle = true;
+  puddle.userData.growTo = 1 + Math.min(0.9, strength * 0.28);
+  puddle.userData.age = 0;
+  world.add(puddle);
+  bloodPuddles.push(puddle);
+
+  // Cap persistent decals so long sessions do not quietly eat memory.
+  if (bloodPuddles.length > 34) {
+    const oldest = bloodPuddles.shift();
+    world.remove(oldest);
+    oldest.geometry.dispose();
+    oldest.material.dispose();
+  }
+}
+
+function updateBloodPuddles(dt) {
+  for (const p of bloodPuddles) {
+    p.userData.age += dt;
+    const target = p.userData.growTo || 1;
+    p.scale.x = THREE.MathUtils.lerp(p.scale.x, target, Math.min(1, dt * 2.4));
+    p.scale.y = THREE.MathUtils.lerp(p.scale.y, target * 0.82, Math.min(1, dt * 2.4));
+    // Fresh puddles are dark glossy-looking marks, then settle slightly.
+    p.material.opacity = THREE.MathUtils.lerp(p.material.opacity, 0.58, Math.min(1, dt * 0.18));
+  }
+}
+
 function debrisBurst(pos, color = 0x889090) {
   for (let i = 0; i < 8; i++) {
     const p = box(pos.x, pos.y, pos.z, 0.06, 0.06, 0.06, color, effectsGroup);
@@ -682,6 +846,7 @@ function doAttack() {
   }
 
   player.attackCooldown = 0.32;
+  startHandSwing('punch');
   player.shake = Math.max(player.shake, 0.035);
   vib(28);
 
@@ -703,6 +868,7 @@ function doAttack() {
   const shove = camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
   npc.root.position.addScaledVector(shove, 0.16);
   bloodBurst(hits[0].point);
+  impactKick(0.75);
   showMsg('WHACK', 280);
 
   if (npc.hp <= 0) {
@@ -749,6 +915,7 @@ function doHeldMeleeAttack() {
   if (!player.held || player.attackCooldown > 0) return;
   const weapon = player.held;
   player.attackCooldown = 0.42;
+  startHandSwing('weapon');
   player.shake = Math.max(player.shake, 0.055);
   vib(34);
 
@@ -761,15 +928,30 @@ function doHeldMeleeAttack() {
   }
 
   const npc = findNPCData(hits[0].object);
-  if (!npc || npc.state === 'down') return;
+  if (!npc) return;
+
+  const wasDown = npc.state === 'down';
+  bloodBurst(hits[0].point);
+  makeBloodPuddle(npc, wasDown ? 1.25 : 1);
+  impactKick(wasDown ? 1.15 : 1.0);
+  useHeldDurability(1);
+
+  if (wasDown) {
+    // Downed bodies can still receive object impacts. Keep the death pose,
+    // but reward the hit with visible feedback and a growing puddle.
+    showMsg(`${weapon.userData.label} IMPACT`, 330);
+    return;
+  }
+
   npc.hp -= weapon.userData.damage;
   reactToHit(npc, 0.4);
   const shove = camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
   npc.root.position.addScaledVector(shove, 0.24);
-  bloodBurst(hits[0].point);
   showMsg(`${weapon.userData.label} WHACK`, 330);
-  useHeldDurability(1);
-  if (npc.hp <= 0) knockDownNPC(npc);
+  if (npc.hp <= 0) {
+    knockDownNPC(npc);
+    makeBloodPuddle(npc, 1.4);
+  }
 }
 
 function nearestPickup() {
@@ -861,6 +1043,7 @@ function playerHit(amount) {
 
   setHealth(player.health - amount);
   player.shake = 0.13;
+  impactKick(0.65);
   damageFlash.classList.add('on');
   setTimeout(() => damageFlash.classList.remove('on'), 120);
   vib([70, 35, 70]);
@@ -1127,20 +1310,29 @@ function updateThrown(dt) {
 
     for (const root of npcGroup.children) {
       const npc = root.userData;
-      if (!npc || npc.state === 'down') continue;
+      if (!npc) continue;
 
-      const chest = new THREE.Vector3(root.position.x, 1, root.position.z);
-      if (obj.position.distanceTo(chest) < 0.85) {
-        npc.hp -= obj.userData.damage;
-        reactToHit(npc, 0.48);
+      const wasDown = npc.state === 'down';
+      const chestY = root.position.y + (wasDown ? 0.30 : 1.0);
+      const chest = new THREE.Vector3(root.position.x, chestY, root.position.z);
+      if (obj.position.distanceTo(chest) < (wasDown ? 1.02 : 0.85)) {
+        if (!wasDown) {
+          npc.hp -= obj.userData.damage;
+          reactToHit(npc, 0.48);
+        }
         bloodBurst(obj.position);
+        makeBloodPuddle(npc, wasDown ? 1.35 : 1.05);
         debrisBurst(obj.position, 0x754337);
-        showMsg('SMASH', 450);
+        impactKick(wasDown ? 1.25 : 1.05);
+        showMsg(wasDown ? 'GROUND SMASH' : 'SMASH', 450);
         obj.userData.life = 0;
         obj.userData.impacted = true;
         obj.userData.durability = Math.max(0, obj.userData.durability - 1);
 
-        if (npc.hp <= 0) knockDownNPC(npc);
+        if (!wasDown && npc.hp <= 0) {
+          knockDownNPC(npc);
+          makeBloodPuddle(npc, 1.5);
+        }
         break;
       }
     }
@@ -1239,6 +1431,8 @@ function updatePlayer(dt) {
       .add(new THREE.Vector3(0, -0.35, 0));
     player.held.position.lerp(target, 0.35);
   }
+
+  updateViewModel(dt);
 }
 
 let mobileMove = { x: 0, y: 0 };
@@ -1355,6 +1549,10 @@ function start() {
   setHealth(100);
   player.yaw = 0;
   player.pitch = 0;
+  player.handSwing = 0;
+  player.hitStop = 0;
+  lowHealthFX.classList.remove('critical');
+  lowHealthFX.style.opacity = '0';
   camera.position.set(0, 1.68, 8);
   running = true;
   startScreen.classList.remove('open');
@@ -1373,7 +1571,13 @@ addEventListener('resize', () => {
 
 function loop(now) {
   requestAnimationFrame(loop);
-  const dt = Math.min(0.033, clock.getDelta());
+  let dt = Math.min(0.033, clock.getDelta());
+
+  // Tiny impact freeze gives hits weight without turning combat sluggish.
+  if (player.hitStop > 0) {
+    player.hitStop = Math.max(0, player.hitStop - dt);
+    dt *= 0.16;
+  }
 
   if (running) {
     updatePlayer(dt);
@@ -1381,6 +1585,7 @@ function loop(now) {
     updateNPCs(dt);
     updateThrown(dt);
     updateEffects(dt);
+    updateBloodPuddles(dt);
   }
 
   renderer.render(scene, camera);
