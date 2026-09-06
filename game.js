@@ -231,13 +231,19 @@ function updateEffects(dt){
 
 function updatePlayer(dt){
   if(player.attackCooldown>0) player.attackCooldown-=dt; if(player.dodgeCooldown>0) player.dodgeCooldown-=dt; if(player.dodgeTime>0) player.dodgeTime-=dt;
-  const fwd=new THREE.Vector3(Math.sin(player.yaw),0,-Math.cos(player.yaw)); const right=new THREE.Vector3(Math.cos(player.yaw),0,Math.sin(player.yaw));
+
+  // The camera's facing direction is always the player's forward direction.
+  // Ignore vertical look (pitch) for walking so looking up/down never changes movement speed.
+  camera.rotation.order='YXZ'; camera.rotation.y=player.yaw; camera.rotation.x=player.pitch; camera.rotation.z=0;
+  const fwd=camera.getWorldDirection(new THREE.Vector3()); fwd.y=0; fwd.normalize();
+  const right=new THREE.Vector3().crossVectors(fwd,camera.up).normalize();
+
   let x=0,z=0; if(keys.has('KeyW'))z+=1; if(keys.has('KeyS'))z-=1; if(keys.has('KeyA'))x-=1; if(keys.has('KeyD'))x+=1; x+=mobileMove.x; z+=mobileMove.y;
   const move=new THREE.Vector3(); move.addScaledVector(fwd,z).addScaledVector(right,x); if(move.lengthSq()>1)move.normalize();
   const speed=4.2; camera.position.addScaledVector(move,speed*dt);
   if(player.dodgeTime>0) camera.position.addScaledVector(right,player.dodgeDir*9*dt);
   camera.position.x=THREE.MathUtils.clamp(camera.position.x,-9.1,9.1); camera.position.z=THREE.MathUtils.clamp(camera.position.z,-41,41); camera.position.y=1.68;
-  camera.rotation.order='YXZ'; camera.rotation.y=player.yaw; camera.rotation.x=player.pitch;
+
   if(player.shake>0){ player.shake=Math.max(0,player.shake-dt*.45); camera.rotation.z+=(Math.random()-.5)*player.shake; camera.rotation.x+=(Math.random()-.5)*player.shake*.45; }
   if(player.held){ const dir=camera.getWorldDirection(new THREE.Vector3()); const target=camera.position.clone().add(dir.multiplyScalar(.8)).add(right.multiplyScalar(.45)).add(new THREE.Vector3(0,-.35,0)); player.held.position.lerp(target,.35); }
 }
