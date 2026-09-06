@@ -228,6 +228,60 @@ for (const side of [-1, 1]) {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Smoking bay. A deliberately plain yellow floor box marks one social spot.
+// Pedestrians on the right pavement may randomly detour here, smoke, then leave.
+// -----------------------------------------------------------------------------
+const SMOKE_ZONE = { x: 7.15, z: 10.0, halfW: 1.15, halfD: 1.35 };
+const smokeZoneGroup = new THREE.Group();
+world.add(smokeZoneGroup);
+const smokeY = 0.194;
+box(SMOKE_ZONE.x, smokeY, SMOKE_ZONE.z - SMOKE_ZONE.halfD, SMOKE_ZONE.halfW * 2, 0.026, 0.08, 0xd0a819, smokeZoneGroup, 0.88);
+box(SMOKE_ZONE.x, smokeY, SMOKE_ZONE.z + SMOKE_ZONE.halfD, SMOKE_ZONE.halfW * 2, 0.026, 0.08, 0xd0a819, smokeZoneGroup, 0.88);
+box(SMOKE_ZONE.x - SMOKE_ZONE.halfW, smokeY, SMOKE_ZONE.z, 0.08, 0.026, SMOKE_ZONE.halfD * 2, 0xd0a819, smokeZoneGroup, 0.88);
+box(SMOKE_ZONE.x + SMOKE_ZONE.halfW, smokeY, SMOKE_ZONE.z, 0.08, 0.026, SMOKE_ZONE.halfD * 2, 0xd0a819, smokeZoneGroup, 0.88);
+
+// -----------------------------------------------------------------------------
+// Usable street objects. These are sparse gameplay props, not decorative clutter.
+// Each has its own impact damage and durability.
+// -----------------------------------------------------------------------------
+function makeUsableObject(label, x, z, kind, damage, durability) {
+  let obj;
+  if (kind === 'bottle') {
+    obj = cylinder(x, 0.44, z, 0.07, 0.105, 0.52, 0x506657, pickupGroup, 8, 0.45, 0.02);
+  } else if (kind === 'can') {
+    obj = cylinder(x, 0.35, z, 0.10, 0.10, 0.34, 0x777b78, pickupGroup, 10, 0.38, 0.45);
+  } else if (kind === 'pipe') {
+    obj = cylinder(x, 0.28, z, 0.055, 0.055, 1.25, 0x555b59, pickupGroup, 8, 0.42, 0.62);
+    obj.rotation.z = Math.PI / 2;
+  } else if (kind === 'plank') {
+    obj = box(x, 0.26, z, 0.22, 0.12, 1.28, 0x6e5942, pickupGroup, 0.9, 0.0);
+    obj.rotation.y = (Math.random() - 0.5) * 0.7;
+  } else {
+    obj = box(x, 0.29, z, 0.42, 0.22, 0.62, 0x744b3d, pickupGroup, 0.96, 0.0);
+    obj.rotation.y = Math.random() * Math.PI;
+  }
+  obj.userData = { type: 'pickup', label, damage, durability, maxDurability: durability, kind };
+  return obj;
+}
+
+const usableDefs = [
+  ['BOTTLE', 'bottle', 17, 2],
+  ['BRICK', 'brick', 27, 5],
+  ['CAN', 'can', 12, 2],
+  ['PLANK', 'plank', 23, 7],
+  ['PIPE', 'pipe', 30, 9]
+];
+for (let i = 0; i < 15; i++) {
+  const [label, kind, damage, durability] = usableDefs[i % usableDefs.length];
+  const side = i % 2 === 0 ? -1 : 1;
+  let z = -31 + (i * 4.7) % 62;
+  // Keep the smoking bay itself clear.
+  if (side > 0 && Math.abs(z - SMOKE_ZONE.z) < 2.2) z += 4.0;
+  const x = side * (5.15 + (i % 3) * 0.95);
+  makeUsableObject(label, x, z, kind, damage, durability);
+}
+
 const player = {
   health: 100,
   yaw: 0,
@@ -366,6 +420,7 @@ function makeActionMap(mixer, source) {
     punchRight: ['Punch_Right'],
     kickLeft: ['Kick_Left'],
     kickRight: ['Kick_Right'],
+    smoke: ['Interact', 'Idle'],
     death: ['Death']
   };
 
@@ -444,6 +499,10 @@ function makeNPC(x, z, variant = 0) {
     laneX: x,
     avoidSide: Math.random() < 0.5 ? -1 : 1,
     avoidTime: 0,
+    smokePlan: x > 0 && Math.random() < 0.34,
+    smokeState: 'none',
+    smokeTimer: 0,
+    smokePuffTimer: 0,
     variant,
     source,
     mixer,
@@ -534,6 +593,22 @@ function findNPCData(obj) {
   return null;
 }
 
+function beginSmokingDetour(npc) {
+  if (!npc || !npc.smokePlan || npc.smokeState !== 'none') return;
+  npc.smokeState = 'approach';
+}
+
+function smokePuff(npc) {
+  const p = new THREE.Mesh(
+    new THREE.SphereGeometry(0.045 + Math.random() * 0.025, 6, 5),
+    new THREE.MeshBasicMaterial({ color: 0x999999, transparent: true, opacity: 0.42, depthWrite: false })
+  );
+  p.position.set(npc.root.position.x, npc.root.position.y + 1.55, npc.root.position.z);
+  p.userData.vel = new THREE.Vector3((Math.random() - 0.5) * 0.08, 0.22 + Math.random() * 0.08, (Math.random() - 0.5) * 0.08);
+  p.userData.life = 1.4;
+  effectsGroup.add(p);
+}
+
 function knockDownNPC(npc) {
   if (!npc || npc.state === 'down') return;
   npc.state = 'down';
@@ -564,6 +639,8 @@ function faceNPCToPlayer(npc, dt = 0, snap = false) {
 }
 
 function reactToHit(npc, stagger = 0.32) {
+  npc.smokeState = 'done';
+  npc.smokePlan = false;
   npc.state = 'angry';
   npc.anger = 7;
   npc.stagger = stagger;
@@ -600,7 +677,7 @@ function debrisBurst(pos, color = 0x889090) {
 function doAttack() {
   if (!running || !player.alive || player.attackCooldown > 0) return;
   if (player.held) {
-    throwHeld();
+    doHeldMeleeAttack();
     return;
   }
 
@@ -634,6 +711,67 @@ function doAttack() {
   }
 }
 
+function updateHeldHUD() {
+  if (!player.held) {
+    heldItemEl.textContent = 'EMPTY HANDS';
+    pickupBtn.textContent = 'PICK UP';
+    return;
+  }
+  const d = player.held.userData;
+  heldItemEl.textContent = `${d.label} ${d.durability}/${d.maxDurability}`;
+  pickupBtn.textContent = 'THROW';
+}
+
+function breakHeldObject() {
+  const obj = player.held;
+  if (!obj) return;
+  const label = obj.userData.label;
+  scene.remove(obj);
+  player.held = null;
+  updateHeldHUD();
+  debrisBurst(camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(0.8)), 0x66615b);
+  vib([35, 25, 45]);
+  showMsg(`${label} BROKE`, 600);
+}
+
+function useHeldDurability(amount = 1) {
+  if (!player.held) return false;
+  player.held.userData.durability = Math.max(0, player.held.userData.durability - amount);
+  if (player.held.userData.durability <= 0) {
+    breakHeldObject();
+    return false;
+  }
+  updateHeldHUD();
+  return true;
+}
+
+function doHeldMeleeAttack() {
+  if (!player.held || player.attackCooldown > 0) return;
+  const weapon = player.held;
+  player.attackCooldown = 0.42;
+  player.shake = Math.max(player.shake, 0.055);
+  vib(34);
+
+  raycaster.setFromCamera(center, camera);
+  raycaster.far = 2.65;
+  const hits = raycaster.intersectObjects(npcGroup.children, true);
+  if (!hits.length) {
+    showMsg('SWING', 240);
+    return;
+  }
+
+  const npc = findNPCData(hits[0].object);
+  if (!npc || npc.state === 'down') return;
+  npc.hp -= weapon.userData.damage;
+  reactToHit(npc, 0.4);
+  const shove = camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+  npc.root.position.addScaledVector(shove, 0.24);
+  bloodBurst(hits[0].point);
+  showMsg(`${weapon.userData.label} WHACK`, 330);
+  useHeldDurability(1);
+  if (npc.hp <= 0) knockDownNPC(npc);
+}
+
 function nearestPickup() {
   raycaster.setFromCamera(center, camera);
   raycaster.far = 2.7;
@@ -658,7 +796,7 @@ function pickup() {
   pickupGroup.remove(obj);
   scene.add(obj);
   obj.rotation.set(0.2, 0.3, 0.15);
-  heldItemEl.textContent = `HELD: ${obj.userData.label}`;
+  updateHeldHUD();
   vib(20);
   showMsg(`GRABBED ${obj.userData.label}`, 400);
 }
@@ -672,17 +810,16 @@ function dropHeld() {
   scene.remove(obj);
   pickupGroup.add(obj);
   player.held = null;
-  heldItemEl.textContent = 'EMPTY HANDS';
+  updateHeldHUD();
 }
 
 function throwHeld() {
   const obj = player.held;
   if (!obj) return;
 
-  const label = obj.userData.label;
-  const damage = obj.userData.damage;
+  const { label, damage, durability, maxDurability, kind } = obj.userData;
   player.held = null;
-  heldItemEl.textContent = 'EMPTY HANDS';
+  updateHeldHUD();
   scene.remove(obj);
   world.add(obj);
 
@@ -690,8 +827,12 @@ function throwHeld() {
     type: 'thrown',
     label,
     damage,
+    durability,
+    maxDurability,
+    kind,
     vel: camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(10).add(new THREE.Vector3(0, 1.1, 0)),
-    life: 4
+    life: 4,
+    impacted: false
   };
   obj.position.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(0.75));
 
@@ -894,6 +1035,43 @@ function updateNPCs(dt) {
     );
     const dist = toPlayer.length();
 
+    // A subset of right-side pedestrians make one spontaneous smoking stop.
+    if (npc.smokePlan && npc.smokeState === 'none' && Math.abs(root.position.z - SMOKE_ZONE.z) < 12) {
+      beginSmokingDetour(npc);
+    }
+
+    if (npc.smokeState === 'approach' && npc.state !== 'angry') {
+      const toSmoke = new THREE.Vector3(SMOKE_ZONE.x - root.position.x, 0, SMOKE_ZONE.z - root.position.z);
+      const smokeDist = toSmoke.length();
+      if (smokeDist > 0.55) {
+        const movement = moveNPC(npc, toSmoke.normalize(), npc.speed * 0.92, dt);
+        faceNPCAlongDirection(npc, movement.dir, dt);
+        playNPCAnimation(npc, 'walk');
+      } else {
+        npc.smokeState = 'smoking';
+        npc.smokeTimer = 4.5 + Math.random() * 5.5;
+        npc.smokePuffTimer = 0.2;
+        playNPCAnimation(npc, 'smoke', { fade: 0.12 });
+      }
+      continue;
+    }
+
+    if (npc.smokeState === 'smoking' && npc.state !== 'angry') {
+      npc.smokeTimer -= dt;
+      npc.smokePuffTimer -= dt;
+      if (npc.smokePuffTimer <= 0) {
+        smokePuff(npc);
+        npc.smokePuffTimer = 0.75 + Math.random() * 0.7;
+      }
+      playNPCAnimation(npc, 'smoke');
+      if (npc.smokeTimer <= 0) {
+        npc.smokeState = 'done';
+        npc.smokePlan = false;
+        playNPCAnimation(npc, 'walk');
+      }
+      continue;
+    }
+
     if (npc.state === 'angry' || npc.anger > 0) {
       npc.anger = Math.max(0, npc.anger - dt);
       npc.state = 'angry';
@@ -959,6 +1137,8 @@ function updateThrown(dt) {
         debrisBurst(obj.position, 0x754337);
         showMsg('SMASH', 450);
         obj.userData.life = 0;
+        obj.userData.impacted = true;
+        obj.userData.durability = Math.max(0, obj.userData.durability - 1);
 
         if (npc.hp <= 0) knockDownNPC(npc);
         break;
@@ -977,15 +1157,23 @@ function updateThrown(dt) {
           showMsg('CRACK', 320);
         }
         obj.userData.life = 0;
+        obj.userData.impacted = true;
+        obj.userData.durability = Math.max(0, obj.userData.durability - 1);
         break;
       }
     }
 
     if (obj.position.y < 0.15 || obj.userData.life <= 0) {
-      obj.position.y = 0.24;
+      if (obj.userData.durability <= 0) {
+        debrisBurst(obj.position, 0x66615b);
+        world.remove(obj);
+        continue;
+      }
+      obj.position.y = Math.abs(obj.position.x) >= 4.18 ? SIDEWALK_TOP_Y + 0.12 : 0.12;
       obj.userData.type = 'pickup';
       obj.userData.label ||= 'JUNK';
       obj.userData.damage ||= 18;
+      obj.userData.maxDurability ||= obj.userData.durability || 1;
       world.remove(obj);
       pickupGroup.add(obj);
     }
@@ -1082,7 +1270,7 @@ document.addEventListener('mousedown', (e) => {
 document.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'KeyE') pickup();
-  if (e.code === 'KeyQ') dropHeld();
+  if (e.code === 'KeyQ' && player.held) throwHeld();
 });
 
 document.addEventListener('keyup', (e) => keys.delete(e.code));
@@ -1156,7 +1344,8 @@ attackBtn.addEventListener('pointerdown', (e) => {
 });
 pickupBtn.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  pickup();
+  if (player.held) throwHeld();
+  else pickup();
 });
 
 function start() {
