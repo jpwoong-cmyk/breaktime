@@ -149,25 +149,27 @@ function makeFinger(parent, x, y, z, scale = 1) {
   root.position.set(x, y, z);
   parent.add(root);
 
+  // Keep the actual finger mass tucked close to the palm. In first-person view
+  // the silhouette matters more than showing four separate sausage shapes.
   const proximal = vmMesh(
-    new THREE.CapsuleGeometry(0.022 * scale, 0.052 * scale, 3, 5),
+    new THREE.CapsuleGeometry(0.017 * scale, 0.038 * scale, 3, 5),
     skinMat,
     root
   );
   proximal.rotation.x = Math.PI / 2;
-  proximal.position.z = -0.027 * scale;
+  proximal.position.z = -0.018 * scale;
 
   const tipJoint = new THREE.Group();
-  tipJoint.position.z = -0.072 * scale;
+  tipJoint.position.z = -0.048 * scale;
   root.add(tipJoint);
 
   const distal = vmMesh(
-    new THREE.CapsuleGeometry(0.020 * scale, 0.043 * scale, 3, 5),
-    skinMat,
+    new THREE.CapsuleGeometry(0.015 * scale, 0.030 * scale, 3, 5),
+    skinShadowMat,
     tipJoint
   );
   distal.rotation.x = Math.PI / 2;
-  distal.position.z = -0.021 * scale;
+  distal.position.z = -0.014 * scale;
 
   root.userData.tipJoint = tipJoint;
   return root;
@@ -176,7 +178,7 @@ function makeFinger(parent, x, y, z, scale = 1) {
 function makeViewArm(side) {
   const sx = side;
   const arm = new THREE.Group();
-  arm.position.set(sx * 0.30, -0.37, -0.37);
+  arm.position.set(sx * 0.38, -0.44, -0.30);
   viewModel.add(arm);
 
   // Sleeve/forearm. The taper is wider toward the camera and narrows at wrist.
@@ -214,8 +216,8 @@ function makeViewArm(side) {
     skinMat,
     handRoot
   );
-  palm.scale.set(0.92, 0.58, 1.22);
-  palm.position.z = -0.055;
+  palm.scale.set(0.90, 0.52, 1.08);
+  palm.position.set(0, -0.006, -0.050);
 
   // Back-of-hand ridge gives the silhouette some structure.
   const handRidge = vmMesh(
@@ -223,19 +225,30 @@ function makeViewArm(side) {
     skinShadowMat,
     handRoot
   );
-  handRidge.scale.set(1.0, 0.28, 0.70);
-  handRidge.position.set(0, 0.047, -0.072);
+  handRidge.scale.set(1.04, 0.18, 0.58);
+  handRidge.position.set(0, 0.032, -0.078);
 
-  const fingerXs = [-0.064, -0.022, 0.022, 0.064];
+  const fingerXs = [-0.056, -0.019, 0.019, 0.056];
   const fingers = fingerXs.map((fx, i) =>
-    makeFinger(handRoot, fx, -0.005, -0.125, 1 - i * 0.025)
+    makeFinger(handRoot, fx, -0.020, -0.112, 0.92 - i * 0.02)
   );
+
+  // One soft knuckle ridge reads much better in first-person than four
+  // individual spheres sticking out of the top of the fist.
+  const knuckleRidge = vmMesh(
+    new THREE.CapsuleGeometry(0.018, 0.135, 3, 6),
+    skinShadowMat,
+    handRoot
+  );
+  knuckleRidge.rotation.z = Math.PI / 2;
+  knuckleRidge.scale.y = 0.82;
+  knuckleRidge.position.set(0, 0.026, -0.116);
 
   // Thumb is angled across the fist instead of pretending to be a fifth finger.
   const thumbRoot = new THREE.Group();
-  thumbRoot.position.set(sx * 0.093, -0.018, -0.055);
-  thumbRoot.rotation.z = sx * -0.72;
-  thumbRoot.rotation.y = sx * -0.26;
+  thumbRoot.position.set(sx * 0.084, -0.030, -0.052);
+  thumbRoot.rotation.z = sx * -0.82;
+  thumbRoot.rotation.y = sx * -0.34;
   handRoot.add(thumbRoot);
 
   const thumb = vmMesh(
@@ -246,16 +259,6 @@ function makeViewArm(side) {
   thumb.rotation.x = Math.PI / 2;
   thumb.position.z = -0.033;
 
-  // Low-poly knuckle caps, subtle rather than three giant beads.
-  fingerXs.forEach((fx) => {
-    const knuckle = vmMesh(
-      new THREE.SphereGeometry(0.027, 6, 4),
-      skinShadowMat,
-      handRoot
-    );
-    knuckle.scale.set(1.0, 0.72, 0.92);
-    knuckle.position.set(fx, 0.054, -0.122);
-  });
 
   arm.userData.handRoot = handRoot;
   arm.userData.fingers = fingers;
@@ -271,8 +274,8 @@ let nextPunchSide = 1;
 function setFingerCurl(arm, curl) {
   const c = THREE.MathUtils.clamp(curl, 0, 1);
   for (const finger of arm.userData.fingers) {
-    finger.rotation.x = -0.18 - c * 1.12;
-    finger.userData.tipJoint.rotation.x = -0.08 - c * 1.18;
+    finger.rotation.x = -0.38 - c * 0.92;
+    finger.userData.tipJoint.rotation.x = -0.34 - c * 0.88;
   }
   arm.userData.thumbRoot.rotation.x = -0.15 - c * 0.38;
   arm.userData.thumbRoot.rotation.y =
@@ -325,14 +328,14 @@ function updateViewModel(dt) {
   const supportArm = punchingRight ? leftViewArm : rightViewArm;
 
   // Reset both anchors every frame so the animation never accumulates drift.
-  leftViewArm.position.set(-0.30, -0.37, -0.37);
-  rightViewArm.position.set(0.30, -0.37, -0.37);
-  leftViewArm.rotation.set(0.03, 0.09, -0.07);
-  rightViewArm.rotation.set(0.03, -0.09, 0.07);
+  leftViewArm.position.set(-0.38, -0.44, -0.30);
+  rightViewArm.position.set(0.38, -0.44, -0.30);
+  leftViewArm.rotation.set(-0.12, 0.24, -0.20);
+  rightViewArm.rotation.set(-0.12, -0.24, 0.20);
 
   // Relaxed fingers are never perfectly straight. Holding an object closes
   // both hands more firmly, while a punch clenches the striking fist fully.
-  const restingCurl = player.held ? 0.83 : 0.34;
+  const restingCurl = player.held ? 0.90 : 0.72;
   setFingerCurl(leftViewArm, restingCurl);
   setFingerCurl(rightViewArm, restingCurl);
 
@@ -340,8 +343,8 @@ function updateViewModel(dt) {
     setFingerCurl(attackArm, 1);
 
     // Punch travels forward, slightly inward, with shoulder roll and wrist turn.
-    attackArm.position.z -= 0.34 * strike;
-    attackArm.position.y += 0.065 * strike;
+    attackArm.position.z -= 0.30 * strike;
+    attackArm.position.y += 0.045 * strike;
     attackArm.position.x += -attackArm.userData.side * 0.075 * strike;
     attackArm.rotation.x = -0.50 * strike;
     attackArm.rotation.y += attackArm.userData.side * 0.17 * strike;
