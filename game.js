@@ -52,6 +52,13 @@ const pickupGroup = new THREE.Group(); scene.add(pickupGroup);
 const breakableGroup = new THREE.Group(); scene.add(breakableGroup);
 const effectsGroup = new THREE.Group(); scene.add(effectsGroup);
 
+// Lightweight 2D obstacle map used by NPC steering. We deliberately avoid a
+// full physics engine here so the game stays small and mobile-friendly.
+const staticObstacles = [];
+function addRectObstacle(x, z, width, depth, padding = 0.35) {
+  staticObstacles.push({ x, z, halfW: width / 2 + padding, halfD: depth / 2 + padding });
+}
+
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(60, 90),
   new THREE.MeshStandardMaterial({ color: 0x444643, roughness: 0.97 })
@@ -85,6 +92,7 @@ for (const side of [-1, 1]) {
     const h = 6 + Math.random() * 8;
     const x = side * (13.2 + Math.random() * 1.2);
     box(x, h / 2, z, w, h, 9, buildingColors[i % buildingColors.length]);
+    addRectObstacle(x, z, w, 9, 0.5);
 
     for (let wy = 2.6; wy < h - 1; wy += 2.7) {
       for (let wx = -w / 2 + 1.4; wx < w / 2 - 1; wx += 2.3) {
@@ -128,6 +136,7 @@ for (let i = 0; i < 7; i++) {
   const x = (i % 2 ? -1 : 1) * 6.1;
   const z = -30 + i * 10;
   box(x, 0.9, z, 0.12, 1.8, 0.12, 0x4d4c48);
+  addRectObstacle(x, z, 0.12, 0.12, 0.5);
   const sign = box(x, 1.85, z, 0.15, 0.8, 1.3, 0x81755a, breakableGroup);
   sign.userData = { type: 'breakable', hp: 2, label: 'SIGN' };
 }
@@ -336,6 +345,9 @@ function makeNPC(x, z, variant = 0) {
     attackTimer: 0,
     actionLock: 0,
     stagger: 0,
+    laneX: x,
+    avoidSide: Math.random() < 0.5 ? -1 : 1,
+    avoidTime: 0,
     variant,
     source,
     mixer,
@@ -572,6 +584,132 @@ function playerHit(amount) {
   showMsg('HIT', 250);
 }
 
+
+function pointInsideStaticObstacle(x, z, radius = 0.36) {
+  for (const o of staticObstacles) {
+    if (Math.abs(x - o.x) <= o.halfW + radius && Math.abs(z - o.z) <= o.halfD + radius) return true;
+  }
+  return false;
+}
+
+function dynamicObstacleAt(x, z, radius = 0.36) {
+  // Loose street items and breakable signs should feel solid to pedestrians.
+  for (const obj of pickupGroup.children) {
+    const extra = obj.userData?.label === 'PLANK' ? 0.65 : 0.42;
+    if (Math.hypot(x - obj.position.x, z - obj.position.z) < radius + extra) return true;
+  }
+  for (const obj of breakableGroup.children) {
+    // Windows live on the building facade and are already covered by the
+    // building collider. Small sign panels still count as street obstacles.
+    if (obj.userData?.label !== 'SIGN') continue;
+    if (Math.hypot(x - obj.position.x, z - obj.position.z) < radius + 0.52) return true;
+  }
+  return false;
+}
+
+function blockedAt(x, z, radius = 0.36) {
+  return pointInsideStaticObstacle(x, z, radius) || dynamicObstacleAt(x, z, radius);
+}
+
+function crowdRepulsion(root) {
+  const push = new THREE.Vector3();
+  for (const other of npcGroup.children) {
+    if (other === root) continue;
+    const dx = root.position.x - other.position.x;
+    const dz = root.position.z - other.position.z;
+    const distSq = dx * dx + dz * dz;
+    if (distSq < 0.0001 || distSq > 1.35 * 1.35) continue;
+    const dist = Math.sqrt(distSq);
+    const strength = (1.35 - dist) / 1.35;
+    push.x += (dx / dist) * strength;
+    push.z += (dz / dist) * strength;
+  }
+  return push;
+}
+
+function steerAroundObstacles(npc, desired, dt) {
+  const root = npc.root;
+  const dir = desired.clone().setY(0);
+  if (dir.lengthSq() < 0.0001) return { dir, avoiding: false };
+  dir.normalize();
+
+  const left = new THREE.Vector3(-dir.z, 0, dir.x);
+  const probeDistance = npc.state === 'angry' ? 1.25 : 1.05;
+  const probeX = root.position.x + dir.x * probeDistance;
+  const probeZ = root.position.z + dir.z * probeDistance;
+  const obstacleAhead = blockedAt(probeX, probeZ, 0.42);
+
+  if (obstacleAhead && npc.avoidTime <= 0) {
+    // Test both shoulders. Prefer the side with clear space, randomise ties so
+    // crowds do not all perform the exact same robotic sidestep.
+    const testForward = 0.55;
+    const sideDistance = 1.0;
+    const lx = root.position.x + dir.x * testForward + left.x * sideDistance;
+    const lz = root.position.z + dir.z * testForward + left.z * sideDistance;
+    const rx = root.position.x + dir.x * testForward - left.x * sideDistance;
+    const rz = root.position.z + dir.z * testForward - left.z * sideDistance;
+    const leftBlocked = blockedAt(lx, lz, 0.38);
+    const rightBlocked = blockedAt(rx, rz, 0.38);
+
+    if (leftBlocked && !rightBlocked) npc.avoidSide = -1;
+    else if (!leftBlocked && rightBlocked) npc.avoidSide = 1;
+    else npc.avoidSide = Math.random() < 0.5 ? -1 : 1;
+    npc.avoidTime = 0.7 + Math.random() * 0.35;
+  }
+
+  if (npc.avoidTime > 0) npc.avoidTime = Math.max(0, npc.avoidTime - dt);
+
+  const steering = dir.clone();
+  const avoiding = obstacleAhead || npc.avoidTime > 0;
+  if (avoiding) {
+    steering.multiplyScalar(0.55);
+    steering.addScaledVector(left, npc.avoidSide * 1.2);
+  }
+
+  // People also give each other a little personal space instead of occupying
+  // the same coordinates like layered cardboard cut-outs.
+  steering.addScaledVector(crowdRepulsion(root), 1.25);
+  if (steering.lengthSq() > 0.0001) steering.normalize();
+  return { dir: steering, avoiding };
+}
+
+function moveNPC(npc, desired, speed, dt) {
+  const { dir, avoiding } = steerAroundObstacles(npc, desired, dt);
+  if (dir.lengthSq() < 0.0001) return { dir, avoiding };
+
+  const root = npc.root;
+  const oldX = root.position.x;
+  const oldZ = root.position.z;
+  root.position.addScaledVector(dir, speed * dt);
+
+  // Safety net: anticipation should do most of the work, but never allow a
+  // frame-rate spike to teleport a pedestrian through solid geometry.
+  if (blockedAt(root.position.x, root.position.z, 0.34)) {
+    root.position.x = oldX;
+    root.position.z = oldZ;
+    const side = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(npc.avoidSide);
+    const tryX = oldX + side.x * speed * dt;
+    const tryZ = oldZ + side.z * speed * dt;
+    if (!blockedAt(tryX, tryZ, 0.34)) {
+      root.position.x = tryX;
+      root.position.z = tryZ;
+    } else {
+      npc.avoidSide *= -1;
+      npc.avoidTime = Math.max(npc.avoidTime, 0.45);
+    }
+  }
+
+  return { dir, avoiding };
+}
+
+function faceNPCAlongDirection(npc, dir, dt) {
+  if (!npc?.root || dir.lengthSq() < 0.0001) return;
+  const targetYaw = Math.atan2(dir.x, dir.z) + MODEL_FACING_OFFSET;
+  const current = npc.root.rotation.y;
+  const delta = Math.atan2(Math.sin(targetYaw - current), Math.cos(targetYaw - current));
+  npc.root.rotation.y = current + delta * Math.min(1, dt * 11);
+}
+
 function startNPCAttack(npc) {
   const options = ['punchLeft', 'punchRight', 'kickLeft', 'kickRight'].filter((name) => npc.actions[name]);
   const attackName = options.length ? options[Math.floor(Math.random() * options.length)] : 'punchRight';
@@ -621,9 +759,10 @@ function updateNPCs(dt) {
       npc.state = 'angry';
 
       if (dist > 1.42) {
-        const v = toPlayer.normalize();
-        root.position.addScaledVector(v, npc.speed * 1.8 * dt);
-        faceNPCToPlayer(npc, dt);
+        const desired = toPlayer.normalize();
+        const movement = moveNPC(npc, desired, npc.speed * 1.8, dt);
+        if (movement.avoiding) faceNPCAlongDirection(npc, movement.dir, dt);
+        else faceNPCToPlayer(npc, dt);
         playNPCAnimation(npc, 'run');
       } else {
         // Keep tracking the player at melee range so circling around an NPC
@@ -640,9 +779,14 @@ function updateNPCs(dt) {
 
       if (npc.anger <= 0 && dist > 6) npc.state = 'wander';
     } else {
-      root.position.z += npc.dir * npc.speed * dt;
       if (root.position.z > 39 || root.position.z < -39) npc.dir *= -1;
-      root.rotation.y = (npc.dir > 0 ? 0 : Math.PI) + MODEL_FACING_OFFSET;
+
+      // Walk generally along the street, but softly return to the NPC's
+      // original lane after detouring around clutter.
+      const laneCorrection = THREE.MathUtils.clamp((npc.laneX - root.position.x) * 0.45, -0.7, 0.7);
+      const desired = new THREE.Vector3(laneCorrection, 0, npc.dir).normalize();
+      const movement = moveNPC(npc, desired, npc.speed, dt);
+      faceNPCAlongDirection(npc, movement.dir, dt);
       playNPCAnimation(npc, 'walk');
     }
   }
