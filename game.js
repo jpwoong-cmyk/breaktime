@@ -803,9 +803,14 @@ function makeNPC(x, z, variant = 0) {
     activeAnimation: '',
     root,
     visual,
-    hitbox
+    hitbox,
+    bones: null,
+    injury: null,
+    bloodMarks: []
   };
 
+  data.bones = cacheNPCBones(visual);
+  data.injury = createNPCInjuryState();
   data.actions = makeActionMap(mixer, source);
   root.userData = data;
   hitbox.userData = data;
@@ -862,6 +867,14 @@ function removeNPC(root) {
     npc.mixer.stopAllAction();
     npc.mixer.uncacheRoot(npc.visual);
   }
+  if (npc?.bloodMarks) {
+    for (const mark of npc.bloodMarks) {
+      mark.parent?.remove(mark);
+      mark.geometry?.dispose?.();
+      mark.material?.dispose?.();
+    }
+    npc.bloodMarks.length = 0;
+  }
   npcGroup.remove(root);
 }
 
@@ -899,6 +912,219 @@ function smokePuff(npc) {
   p.userData.vel = new THREE.Vector3((Math.random() - 0.5) * 0.08, 0.22 + Math.random() * 0.08, (Math.random() - 0.5) * 0.08);
   p.userData.life = 1.4;
   effectsGroup.add(p);
+}
+
+
+// -----------------------------------------------------------------------------
+// Rig-based impact / fracture system.
+// The uploaded Quaternius characters expose separate Head, Wrist, arm and leg
+// bones, so impacts can be classified against the real animated skeleton.
+// Fractures are stylized persistent joint poses, not mesh slicing.
+// -----------------------------------------------------------------------------
+const INJURY_ZONE_DEFS = {
+  head:      { label: 'HEAD',       threshold: 28, bones: ['Head', 'Neck'] },
+  torso:     { label: 'TORSO',      threshold: Infinity, bones: ['Chest', 'Torso', 'Abdomen', 'Hips'] },
+  leftHand:  { label: 'LEFT HAND',  threshold: 20, bones: ['Wrist.L', 'Index1.L', 'Middle1.L', 'Ring1.L', 'Pinky1.L', 'Thumb1.L'] },
+  rightHand: { label: 'RIGHT HAND', threshold: 20, bones: ['Wrist.R', 'Index1.R', 'Middle1.R', 'Ring1.R', 'Pinky1.R', 'Thumb1.R'] },
+  leftArm:   { label: 'LEFT ARM',   threshold: 34, bones: ['UpperArm.L', 'LowerArm.L'] },
+  rightArm:  { label: 'RIGHT ARM',  threshold: 34, bones: ['UpperArm.R', 'LowerArm.R'] },
+  leftLeg:   { label: 'LEFT LEG',   threshold: 40, bones: ['UpperLeg.L', 'LowerLeg.L', 'Foot.L'] },
+  rightLeg:  { label: 'RIGHT LEG',  threshold: 40, bones: ['UpperLeg.R', 'LowerLeg.R', 'Foot.R'] }
+};
+
+const INJURY_BONE_NAMES = new Set(
+  Object.values(INJURY_ZONE_DEFS).flatMap((def) => def.bones)
+);
+
+function cacheNPCBones(visual) {
+  const bones = {};
+  visual.traverse((obj) => {
+    if (INJURY_BONE_NAMES.has(obj.name)) bones[obj.name] = obj;
+  });
+  return bones;
+}
+
+function createNPCInjuryState() {
+  const trauma = {};
+  const fractured = {};
+  const bend = {};
+  for (const zone of Object.keys(INJURY_ZONE_DEFS)) {
+    trauma[zone] = 0;
+    fractured[zone] = false;
+    bend[zone] = Math.random() < 0.5 ? -1 : 1;
+  }
+  return { trauma, fractured, bend };
+}
+
+function bodyImpactInfo(npc, worldPoint) {
+  if (!npc?.bones || !worldPoint) return { zone: 'torso', bone: null, distance: Infinity };
+
+  let bestZone = 'torso';
+  let bestBone = npc.bones.Chest || npc.bones.Torso || null;
+  let bestDistance = Infinity;
+  const pos = new THREE.Vector3();
+
+  for (const [zone, def] of Object.entries(INJURY_ZONE_DEFS)) {
+    for (const name of def.bones) {
+      const bone = npc.bones[name];
+      if (!bone) continue;
+      bone.getWorldPosition(pos);
+      const d = pos.distanceTo(worldPoint);
+      if (d < bestDistance) {
+        bestDistance = d;
+        bestZone = zone;
+        bestBone = bone;
+      }
+    }
+  }
+  return { zone: bestZone, bone: bestBone, distance: bestDistance };
+}
+
+function addBloodImpactMark(npc, worldPoint, bone) {
+  if (!bloodToggle.checked || !npc?.root || !worldPoint) return;
+
+  const mark = new THREE.Mesh(
+    new THREE.SphereGeometry(0.043 + Math.random() * 0.025, 6, 4),
+    new THREE.MeshBasicMaterial({
+      color: Math.random() < 0.5 ? 0x6d0808 : 0x850b0b,
+      transparent: true,
+      opacity: 0.88,
+      depthWrite: false
+    })
+  );
+  mark.scale.set(1.35, 0.42, 1.0 + Math.random() * 0.55);
+  mark.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+
+  // Add in world space first, then re-parent while preserving the impact
+  // transform so the stain follows the animated body part.
+  scene.add(mark);
+  mark.position.copy(worldPoint);
+  mark.updateMatrixWorld(true);
+
+  const anchor = bone || npc.visual;
+  anchor.attach(mark);
+  npc.bloodMarks.push(mark);
+
+  // Enough to visibly accumulate damage without turning a long session into
+  // hundreds of tiny meshes per pedestrian.
+  if (npc.bloodMarks.length > 10) {
+    const oldest = npc.bloodMarks.shift();
+    oldest.parent?.remove(oldest);
+    oldest.geometry.dispose();
+    oldest.material.dispose();
+  }
+}
+
+function injuryWeaponMultiplier(kind) {
+  switch (kind) {
+    case 'pipe': return 1.38;
+    case 'brick': return 1.24;
+    case 'plank': return 1.02;
+    case 'bottle': return 0.76;
+    case 'can': return 0.58;
+    default: return 1;
+  }
+}
+
+function fractureZone(npc, zone) {
+  if (!npc?.injury || npc.injury.fractured[zone] || zone === 'torso') return false;
+  npc.injury.fractured[zone] = true;
+
+  // Hands count as disabling the matching arm's punches, but retain their own
+  // visual wrist break so the hit location remains readable.
+  const bothLegs =
+    (zone === 'leftLeg' || npc.injury.fractured.leftLeg) &&
+    (zone === 'rightLeg' || npc.injury.fractured.rightLeg);
+
+  if (zone === 'head' || bothLegs) {
+    knockDownNPC(npc);
+  }
+
+  vib([45, 28, 85]);
+  return true;
+}
+
+function registerObjectImpact(npc, worldPoint, impact, kind, thrown = false) {
+  const info = bodyImpactInfo(npc, worldPoint);
+  addBloodImpactMark(npc, worldPoint, info.bone);
+
+  const zone = info.zone;
+  const def = INJURY_ZONE_DEFS[zone];
+  if (!def || !Number.isFinite(def.threshold) || npc.injury.fractured[zone]) {
+    return { ...info, fractured: false };
+  }
+
+  let traumaGain = impact * injuryWeaponMultiplier(kind);
+  if (thrown) traumaGain *= 1.22;
+  npc.injury.trauma[zone] += traumaGain;
+
+  const trauma = npc.injury.trauma[zone];
+  if (trauma < def.threshold) return { ...info, fractured: false };
+
+  const overload = Math.max(0, (trauma - def.threshold) / def.threshold);
+  const impactBonus = THREE.MathUtils.clamp(impact / 90, 0, 0.28);
+  const chance = THREE.MathUtils.clamp(0.22 + overload * 0.33 + impactBonus, 0.22, 0.86);
+  const forced = trauma >= def.threshold * 2.05;
+  const fractured = forced || Math.random() < chance ? fractureZone(npc, zone) : false;
+
+  return { ...info, fractured };
+}
+
+function npcMobilityMultiplier(npc) {
+  if (!npc?.injury) return 1;
+  const left = npc.injury.fractured.leftLeg;
+  const right = npc.injury.fractured.rightLeg;
+  if (left && right) return 0.12;
+  if (left || right) return 0.56;
+  return 1;
+}
+
+function applyBoneOffset(npc, boneName, x = 0, y = 0, z = 0) {
+  const bone = npc?.bones?.[boneName];
+  if (!bone) return;
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'XYZ'));
+  bone.quaternion.multiply(q);
+}
+
+function applyInjuryPose(npc) {
+  if (!npc?.injury) return;
+  const f = npc.injury.fractured;
+  const bend = npc.injury.bend;
+
+  if (f.leftHand) {
+    applyBoneOffset(npc, 'Wrist.L', 0.42, 0.12 * bend.leftHand, 0.72 * bend.leftHand);
+  }
+  if (f.rightHand) {
+    applyBoneOffset(npc, 'Wrist.R', 0.42, -0.12 * bend.rightHand, -0.72 * bend.rightHand);
+  }
+
+  if (f.leftArm) {
+    applyBoneOffset(npc, 'UpperArm.L', 0.10, 0.16, 0.64 * bend.leftArm);
+    applyBoneOffset(npc, 'LowerArm.L', 0.68, 0.10, 0.30 * bend.leftArm);
+  }
+  if (f.rightArm) {
+    applyBoneOffset(npc, 'UpperArm.R', 0.10, -0.16, -0.64 * bend.rightArm);
+    applyBoneOffset(npc, 'LowerArm.R', 0.68, -0.10, -0.30 * bend.rightArm);
+  }
+
+  if (f.leftLeg) {
+    applyBoneOffset(npc, 'UpperLeg.L', 0.06, 0.08, 0.16 * bend.leftLeg);
+    applyBoneOffset(npc, 'LowerLeg.L', 0.28, 0.06, 0.34 * bend.leftLeg);
+  }
+  if (f.rightLeg) {
+    applyBoneOffset(npc, 'UpperLeg.R', 0.06, -0.08, -0.16 * bend.rightLeg);
+    applyBoneOffset(npc, 'LowerLeg.R', 0.28, -0.06, -0.34 * bend.rightLeg);
+  }
+
+  if (f.head) {
+    applyBoneOffset(npc, 'Neck', -0.18, 0.08 * bend.head, 0.33 * bend.head);
+    applyBoneOffset(npc, 'Head', -0.16, 0.06 * bend.head, 0.18 * bend.head);
+  }
+}
+
+function fractureMessage(result) {
+  if (!result?.fractured) return '';
+  return `${INJURY_ZONE_DEFS[result.zone]?.label || 'LIMB'} FRACTURE`;
 }
 
 function knockDownNPC(npc) {
@@ -1114,18 +1340,29 @@ function doHeldMeleeAttack() {
   impactKick(wasDown ? 1.15 : 1.0);
   useHeldDurability(1);
 
+  if (!wasDown) {
+    npc.hp -= weapon.userData.damage;
+    reactToHit(npc, 0.4);
+    const shove = camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+    npc.root.position.addScaledVector(shove, 0.24);
+  }
+
+  const injuryResult = registerObjectImpact(
+    npc,
+    hits[0].point,
+    weapon.userData.damage,
+    weapon.userData.kind,
+    false
+  );
+  const fractureText = fractureMessage(injuryResult);
+
   if (wasDown) {
-    // Downed bodies can still receive object impacts. Keep the death pose,
-    // but reward the hit with visible feedback and a growing puddle.
-    showMsg(`${weapon.userData.label} IMPACT`, 330);
+    // Downed bodies still retain hit-zone stains and can accumulate fractures.
+    showMsg(fractureText || `${weapon.userData.label} IMPACT`, fractureText ? 720 : 330);
     return;
   }
 
-  npc.hp -= weapon.userData.damage;
-  reactToHit(npc, 0.4);
-  const shove = camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
-  npc.root.position.addScaledVector(shove, 0.24);
-  showMsg(`${weapon.userData.label} WHACK`, 330);
+  showMsg(fractureText || `${weapon.userData.label} WHACK`, fractureText ? 720 : 330);
   if (npc.hp <= 0) {
     knockDownNPC(npc);
     makeBloodPuddle(npc, 1.4);
@@ -1347,8 +1584,24 @@ function faceNPCAlongDirection(npc, dir, dt) {
 }
 
 function startNPCAttack(npc) {
-  const options = ['punchLeft', 'punchRight', 'kickLeft', 'kickRight'].filter((name) => npc.actions[name]);
-  const attackName = options.length ? options[Math.floor(Math.random() * options.length)] : 'punchRight';
+  const f = npc.injury?.fractured || {};
+  const leftArmDisabled = f.leftArm || f.leftHand;
+  const rightArmDisabled = f.rightArm || f.rightHand;
+
+  const options = [];
+  if (!leftArmDisabled && npc.actions.punchLeft) options.push('punchLeft');
+  if (!rightArmDisabled && npc.actions.punchRight) options.push('punchRight');
+  if (!f.leftLeg && npc.actions.kickLeft) options.push('kickLeft');
+  if (!f.rightLeg && npc.actions.kickRight) options.push('kickRight');
+
+  // A badly injured pedestrian may simply be unable to throw another attack.
+  if (!options.length) {
+    npc.attackTimer = 1.25;
+    playNPCAnimation(npc, 'idle');
+    return;
+  }
+
+  const attackName = options[Math.floor(Math.random() * options.length)];
 
   // Always square up before throwing the attack.
   faceNPCToPlayer(npc, 0, true);
@@ -1371,6 +1624,9 @@ function updateNPCs(dt) {
     if (!npc?.mixer) continue;
 
     npc.mixer.update(dt);
+    // AnimationMixer writes the normal pose first. Persistent fracture offsets
+    // are layered afterward so they remain visible during walk/run/death clips.
+    applyInjuryPose(npc);
     if (npc.state === 'down') continue;
 
     // Keep the soles planted on whichever surface the NPC is crossing.
@@ -1439,7 +1695,7 @@ function updateNPCs(dt) {
 
       if (dist > 1.42) {
         const desired = toPlayer.normalize();
-        const movement = moveNPC(npc, desired, npc.speed * 1.8, dt);
+        const movement = moveNPC(npc, desired, npc.speed * 1.8 * npcMobilityMultiplier(npc), dt);
         if (movement.avoiding) faceNPCAlongDirection(npc, movement.dir, dt);
         else faceNPCToPlayer(npc, dt);
         playNPCAnimation(npc, 'run');
@@ -1469,7 +1725,7 @@ function updateNPCs(dt) {
       // pavement lane after detouring around another person or a lamppost.
       const laneCorrection = THREE.MathUtils.clamp((npc.laneX - root.position.x) * 0.45, -0.7, 0.7);
       const desired = new THREE.Vector3(laneCorrection, 0, npc.dir).normalize();
-      const movement = moveNPC(npc, desired, npc.speed, dt);
+      const movement = moveNPC(npc, desired, npc.speed * npcMobilityMultiplier(npc), dt);
       faceNPCAlongDirection(npc, movement.dir, dt);
       playNPCAnimation(npc, 'walk');
     }
@@ -1491,18 +1747,36 @@ function updateThrown(dt) {
       if (!npc) continue;
 
       const wasDown = npc.state === 'down';
+      const zoneProbe = bodyImpactInfo(npc, obj.position);
       const chestY = root.position.y + (wasDown ? 0.30 : 1.0);
       const chest = new THREE.Vector3(root.position.x, chestY, root.position.z);
-      if (obj.position.distanceTo(chest) < (wasDown ? 1.02 : 0.85)) {
+
+      // Prefer the actual animated skeleton for limb/head hits. The torso
+      // fallback keeps fast throws forgiving when they pass between bone nodes.
+      const skeletonHit = zoneProbe.distance < (wasDown ? 0.40 : 0.34);
+      const torsoFallback = obj.position.distanceTo(chest) < (wasDown ? 1.02 : 0.72);
+      if (skeletonHit || torsoFallback) {
         if (!wasDown) {
           npc.hp -= obj.userData.damage;
           reactToHit(npc, 0.48);
         }
+
+        const impactSpeed = obj.userData.vel?.length?.() || 8;
+        const impactValue = obj.userData.damage + impactSpeed * 1.2;
+        const injuryResult = registerObjectImpact(
+          npc,
+          obj.position.clone(),
+          impactValue,
+          obj.userData.kind,
+          true
+        );
+        const fractureText = fractureMessage(injuryResult);
+
         bloodBurst(obj.position);
         makeBloodPuddle(npc, wasDown ? 1.35 : 1.05);
         debrisBurst(obj.position, 0x754337);
         impactKick(wasDown ? 1.25 : 1.05);
-        showMsg(wasDown ? 'GROUND SMASH' : 'SMASH', 450);
+        showMsg(fractureText || (wasDown ? 'GROUND SMASH' : 'SMASH'), fractureText ? 720 : 450);
         obj.userData.life = 0;
         obj.userData.impacted = true;
         obj.userData.durability = Math.max(0, obj.userData.durability - 1);
