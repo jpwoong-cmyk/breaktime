@@ -46,10 +46,12 @@ button:active { transform: translateY(1px); }
 #mobileControls { display: none; position: fixed; inset: 0; z-index: 20; pointer-events: none; }
 .pad { position: absolute; left: 22px; bottom: max(28px, env(safe-area-inset-bottom)); width: 128px; height: 128px; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.25); border-radius: 50%; pointer-events: auto; }
 .knob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; transform: translate(-50%,-50%); border-radius: 50%; background: rgba(255,255,255,.35); }
-.action-stack { position: absolute; right: 20px; bottom: max(28px, env(safe-area-inset-bottom)); display: grid; gap: 10px; pointer-events: auto; }
-.action { width: 88px; height: 58px; padding: 0; }
+.action-stack { position: absolute; right: 20px; bottom: max(28px, env(safe-area-inset-bottom)); display: grid; gap: 8px; pointer-events: auto; }
+.action { width: 88px; height: 58px; padding: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
 .action.primary { background: #e6e5dc; }
 .action.secondary { background: rgba(12,12,12,.78); color: #ddd; border: 1px solid rgba(255,255,255,.25); }
+.action.block { background: rgba(34,34,32,.90); color: #eee; border: 1px solid rgba(255,255,255,.42); }
+.action.block.active { background: #d9d8cf; color: #111; border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.16); transform: translateY(1px); }
 @media (pointer: coarse), (max-width: 900px) {
   #mobileControls { display: block; }
   .health-wrap { bottom: auto; top: max(44px, calc(env(safe-area-inset-top) + 40px)); width: 180px; }

@@ -36,10 +36,10 @@
     <div class="panel-card">
       <div class="eyebrow">NO SAVE · NO SCORE · NO CONSEQUENCES</div>
       <h1>BREAKTIME</h1>
-      <p>Walk around. Whack passers-by. Dodge the return swing. Pick up junk and throw it into breakable stuff.</p>
+      <p>Walk around. Whack passers-by. Block the return swing. Pick up junk and throw it into breakable stuff.</p>
       <div class="controls-grid">
-        <div><b>Desktop</b><span>WASD move · Mouse look · Click attack/throw · E pick up · Q drop · A/D double-tap dodge</span></div>
-        <div><b>Mobile</b><span>Left thumb move · Drag right side look · Tap attack · Swipe left/right dodge · PICK UP button for objects</span></div>
+        <div><b>Desktop</b><span>WASD move · Mouse look · Left click attack/throw · Hold right mouse or Space to block · E pick up · Q drop</span></div>
+        <div><b>Mobile</b><span>Left thumb move · Drag right side to look/turn · WHACK attack · Hold BLOCK to guard · PICK UP for objects</span></div>
       </div>
       <button id="startBtn" disabled>LOADING PEOPLE...</button>
       <label class="blood-toggle"><input id="bloodToggle" type="checkbox" checked /> Stylised blood particles</label>
@@ -59,6 +59,7 @@
     <div id="movePad" class="pad"><div id="moveKnob" class="knob"></div></div>
     <div class="action-stack">
       <button id="pickupBtn" class="action secondary">PICK UP</button>
+      <button id="blockBtn" class="action block">BLOCK</button>
       <button id="attackBtn" class="action primary">WHACK</button>
     </div>
   </div>

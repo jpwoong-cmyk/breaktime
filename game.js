@@ -16,6 +16,7 @@ const fpsEl = document.querySelector('#fps');
 const bloodToggle = document.querySelector('#bloodToggle');
 const attackBtn = document.querySelector('#attackBtn');
 const pickupBtn = document.querySelector('#pickupBtn');
+const blockBtn = document.querySelector('#blockBtn');
 const movePad = document.querySelector('#movePad');
 const moveKnob = document.querySelector('#moveKnob');
 
@@ -138,6 +139,11 @@ const sleeveMat = new THREE.MeshStandardMaterial({
 
 function vmMesh(geometry, material, parent) {
   const mesh = new THREE.Mesh(geometry, material);
+  // First-person hands are a view model. They should never disappear behind
+  // nearby world geometry, otherwise the player appears to attack with air.
+  material.depthTest = false;
+  material.depthWrite = false;
+  mesh.renderOrder = 50;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   parent.add(mesh);
@@ -178,7 +184,7 @@ function makeFinger(parent, x, y, z, scale = 1) {
 function makeViewArm(side) {
   const sx = side;
   const arm = new THREE.Group();
-  arm.position.set(sx * 0.38, -0.44, -0.30);
+  arm.position.set(sx * 0.31, -0.31, -0.22);
   viewModel.add(arm);
 
   // Sleeve/forearm. The taper is wider toward the camera and narrows at wrist.
@@ -260,7 +266,12 @@ function makeViewArm(side) {
   thumb.position.z = -0.033;
 
 
+  const holdPoint = new THREE.Object3D();
+  holdPoint.position.set(sx * -0.015, -0.018, -0.155);
+  handRoot.add(holdPoint);
+
   arm.userData.handRoot = handRoot;
+  arm.userData.holdPoint = holdPoint;
   arm.userData.fingers = fingers;
   arm.userData.thumbRoot = thumbRoot;
   arm.userData.side = side;
@@ -304,18 +315,19 @@ function impactKick(strength = 1) {
 
 function updateViewModel(dt) {
   const now = performance.now();
-  const walkBob = running ? Math.sin(now * 0.008) * 0.008 : 0;
-  const walkSway = running ? Math.sin(now * 0.004) * 0.012 : 0;
+  const walkBob = running ? Math.sin(now * 0.008) * 0.010 : 0;
+  const walkSway = running ? Math.sin(now * 0.004) * 0.014 : 0;
 
-  viewModel.position.y = walkBob + (player.held ? -0.022 : 0);
-  viewModel.position.x = walkSway * 0.35;
-  viewModel.rotation.z = -walkSway * 0.20;
+  viewModel.position.y = walkBob + (player.held ? -0.010 : 0);
+  viewModel.position.x = walkSway * 0.30;
+  viewModel.rotation.z = -walkSway * 0.18;
 
   if (player.handSwing > 0) {
-    player.handSwing = Math.max(
-      0,
-      player.handSwing - dt * (player.handSwingKind === 'weapon' ? 4.8 : 6.3)
-    );
+    const speed =
+      player.handSwingKind === 'weapon' ? 4.8 :
+      player.handSwingKind === 'grab' ? 5.6 :
+      6.3;
+    player.handSwing = Math.max(0, player.handSwing - dt * speed);
   }
 
   const active = player.handSwing > 0;
@@ -327,45 +339,62 @@ function updateViewModel(dt) {
   const attackArm = punchingRight ? rightViewArm : leftViewArm;
   const supportArm = punchingRight ? leftViewArm : rightViewArm;
 
-  // Reset both anchors every frame so the animation never accumulates drift.
-  leftViewArm.position.set(-0.38, -0.44, -0.30);
-  rightViewArm.position.set(0.38, -0.44, -0.30);
-  leftViewArm.rotation.set(-0.12, 0.24, -0.20);
-  rightViewArm.rotation.set(-0.12, -0.24, 0.20);
+  // Keep both fists clearly inside the camera frame. The previous anchors sat
+  // so low that on some aspect ratios the hands were almost completely hidden.
+  leftViewArm.position.set(-0.31, -0.31, -0.22);
+  rightViewArm.position.set(0.31, -0.31, -0.22);
+  leftViewArm.rotation.set(-0.10, 0.22, -0.16);
+  rightViewArm.rotation.set(-0.10, -0.22, 0.16);
 
-  // Relaxed fingers are never perfectly straight. Holding an object closes
-  // both hands more firmly, while a punch clenches the striking fist fully.
-  const restingCurl = player.held ? 0.90 : 0.72;
+  const restingCurl = player.held ? 0.92 : 0.76;
   setFingerCurl(leftViewArm, restingCurl);
   setFingerCurl(rightViewArm, restingCurl);
 
-  if (active && player.handSwingKind === 'punch') {
+  if (player.blocking) {
+    setFingerCurl(leftViewArm, 1);
+    setFingerCurl(rightViewArm, 1);
+
+    leftViewArm.position.set(-0.19, -0.17, -0.39);
+    rightViewArm.position.set(0.19, -0.17, -0.39);
+    leftViewArm.rotation.set(-0.48, 0.13, -0.20);
+    rightViewArm.rotation.set(-0.48, -0.13, 0.20);
+  } else if (active && player.handSwingKind === 'punch') {
     setFingerCurl(attackArm, 1);
 
-    // Punch travels forward, slightly inward, with shoulder roll and wrist turn.
-    attackArm.position.z -= 0.30 * strike;
-    attackArm.position.y += 0.045 * strike;
-    attackArm.position.x += -attackArm.userData.side * 0.075 * strike;
-    attackArm.rotation.x = -0.50 * strike;
+    attackArm.position.z -= 0.34 * strike;
+    attackArm.position.y += 0.075 * strike;
+    attackArm.position.x += -attackArm.userData.side * 0.070 * strike;
+    attackArm.rotation.x = -0.54 * strike;
     attackArm.rotation.y += attackArm.userData.side * 0.17 * strike;
-    attackArm.rotation.z += -attackArm.userData.side * 0.32 * snap;
+    attackArm.rotation.z += -attackArm.userData.side * 0.34 * snap;
 
-    // The other hand stays up like a crude guard rather than mirroring the hit.
-    supportArm.position.z -= 0.055 * strike;
-    supportArm.position.y += 0.018 * strike;
-    setFingerCurl(supportArm, 0.70);
+    supportArm.position.z -= 0.080 * strike;
+    supportArm.position.y += 0.030 * strike;
+    setFingerCurl(supportArm, 0.80);
   } else if (active && player.handSwingKind === 'weapon') {
-    // Weapon swing is driven by the right arm: cock back, cut across, recover.
-    setFingerCurl(rightViewArm, 0.95);
-    rightViewArm.position.z -= 0.17 * strike;
-    rightViewArm.position.y += 0.07 * strike;
+    setFingerCurl(rightViewArm, 0.98);
+    rightViewArm.position.z -= 0.20 * strike;
+    rightViewArm.position.y += 0.09 * strike;
     rightViewArm.position.x -= 0.09 * strike;
-    rightViewArm.rotation.x = -0.58 * strike;
-    rightViewArm.rotation.y = -0.40 * strike;
-    rightViewArm.rotation.z = -0.72 * snap;
+    rightViewArm.rotation.x = -0.60 * strike;
+    rightViewArm.rotation.y = -0.42 * strike;
+    rightViewArm.rotation.z = -0.74 * snap;
 
-    leftViewArm.position.z -= 0.035 * strike;
-    setFingerCurl(leftViewArm, 0.62);
+    leftViewArm.position.z -= 0.050 * strike;
+    setFingerCurl(leftViewArm, 0.70);
+  } else if (active && player.handSwingKind === 'grab') {
+    setFingerCurl(rightViewArm, 0.45 + 0.5 * strike);
+    rightViewArm.position.z -= 0.26 * strike;
+    rightViewArm.position.y += 0.04 * strike;
+    rightViewArm.position.x -= 0.055 * strike;
+    rightViewArm.rotation.x = -0.30 * strike;
+  } else if (player.held) {
+    setFingerCurl(rightViewArm, 1);
+    rightViewArm.position.set(0.25, -0.24, -0.34);
+    rightViewArm.rotation.set(-0.24, -0.30, 0.18);
+
+    leftViewArm.position.set(-0.28, -0.28, -0.24);
+    setFingerCurl(leftViewArm, 0.78);
   }
 }
 
@@ -569,9 +598,7 @@ const player = {
   pitch: 0,
   held: null,
   attackCooldown: 0,
-  dodgeCooldown: 0,
-  dodgeTime: 0,
-  dodgeDir: 0,
+  blocking: false,
   shake: 0,
   alive: true,
   handSwing: 0,
@@ -619,6 +646,8 @@ function die() {
   if (!player.alive) return;
   player.alive = false;
   running = false;
+  player.blocking = false;
+  blockBtn?.classList.remove('active');
   deathScreen.classList.add('open');
   document.exitPointerLock?.();
   vib([120, 60, 180]);
@@ -1133,6 +1162,11 @@ function knockDownNPC(npc) {
   npc.actionLock = 999;
   npc.hitbox.visible = false;
   playNPCAnimation(npc, 'death', { once: true, fade: 0.08 });
+
+  // Flooring someone is the heaviest tactile beat in the game.
+  player.shake = Math.max(player.shake, 0.18);
+  impactKick(1.65);
+  vib([120, 45, 180, 55, 260]);
 }
 
 function faceNPCToPlayer(npc, dt = 0, snap = false) {
@@ -1243,7 +1277,7 @@ function debrisBurst(pos, color = 0x889090) {
 }
 
 function doAttack() {
-  if (!running || !player.alive || player.attackCooldown > 0) return;
+  if (!running || !player.alive || player.attackCooldown > 0 || player.blocking) return;
   if (player.held) {
     doHeldMeleeAttack();
     return;
@@ -1389,6 +1423,7 @@ function pickup() {
     return;
   }
 
+  startHandSwing('grab');
   player.held = obj;
   pickupGroup.remove(obj);
   scene.add(obj);
@@ -1439,20 +1474,37 @@ function throwHeld() {
   showMsg('THROW', 260);
 }
 
-function dodge(dir) {
-  if (!running || player.dodgeCooldown > 0) return;
-  player.dodgeCooldown = 0.7;
-  player.dodgeTime = 0.24;
-  player.dodgeDir = dir;
-  player.shake = 0.03;
-  vib(18);
-  showMsg(dir < 0 ? 'DODGE LEFT' : 'DODGE RIGHT', 260);
+function setBlocking(value) {
+  const next = !!value && running && player.alive;
+  if (player.blocking === next) return;
+  player.blocking = next;
+  if (next) {
+    player.handSwing = 0;
+    vib(12);
+  }
+  blockBtn?.classList.toggle('active', next);
 }
 
-function playerHit(amount) {
-  if (player.dodgeTime > 0) {
-    showMsg('PERFECT DODGE', 500);
-    vib(12);
+function blockCatches(sourceNPC) {
+  if (!player.blocking) return false;
+  if (!sourceNPC?.root) return true;
+
+  const forward = camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+  const towardAttacker = sourceNPC.root.position.clone().sub(camera.position).setY(0);
+  if (towardAttacker.lengthSq() < 0.0001) return true;
+  towardAttacker.normalize();
+
+  return forward.dot(towardAttacker) > 0.25;
+}
+
+function playerHit(amount, sourceNPC = null) {
+  if (blockCatches(sourceNPC)) {
+    const chip = Math.max(1, amount * 0.18);
+    setHealth(player.health - chip);
+    player.shake = Math.max(player.shake, 0.055);
+    impactKick(0.36);
+    vib([30, 18, 40]);
+    showMsg('BLOCKED', 300);
     return;
   }
 
@@ -1614,7 +1666,7 @@ function startNPCAttack(npc) {
       camera.position.x - npc.root.position.x,
       camera.position.z - npc.root.position.z
     ).length();
-    if (dist < 1.75) playerHit(6 + Math.random() * 9);
+    if (dist < 1.75) playerHit(6 + Math.random() * 9, npc);
   }, 220);
 }
 
@@ -1835,8 +1887,6 @@ function updateEffects(dt) {
 
 function updatePlayer(dt) {
   if (player.attackCooldown > 0) player.attackCooldown -= dt;
-  if (player.dodgeCooldown > 0) player.dodgeCooldown -= dt;
-  if (player.dodgeTime > 0) player.dodgeTime -= dt;
 
   // Camera facing is the one source of truth for movement direction.
   camera.rotation.order = 'YXZ';
@@ -1863,7 +1913,6 @@ function updatePlayer(dt) {
   if (move.lengthSq() > 1) move.normalize();
 
   camera.position.addScaledVector(move, 4.2 * dt);
-  if (player.dodgeTime > 0) camera.position.addScaledVector(right, player.dodgeDir * 9 * dt);
 
   camera.position.x = THREE.MathUtils.clamp(camera.position.x, -9.1, 9.1);
   camera.position.z = THREE.MathUtils.clamp(camera.position.z, -41, 41);
@@ -1876,12 +1925,14 @@ function updatePlayer(dt) {
   }
 
   if (player.held) {
-    const dir = camera.getWorldDirection(new THREE.Vector3());
-    const target = camera.position.clone()
-      .add(dir.multiplyScalar(0.8))
-      .add(right.clone().multiplyScalar(0.45))
-      .add(new THREE.Vector3(0, -0.35, 0));
-    player.held.position.lerp(target, 0.35);
+    const target = new THREE.Vector3();
+    rightViewArm.userData.holdPoint.getWorldPosition(target);
+    player.held.position.lerp(target, 0.48);
+
+    const targetQ = camera.quaternion.clone().multiply(
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(0.18, 0.28, 0.10, 'XYZ'))
+    );
+    player.held.quaternion.slerp(targetQ, 0.30);
   }
 
   updateViewModel(dt);
@@ -1891,12 +1942,19 @@ let mobileMove = { x: 0, y: 0 };
 let movePointer = null;
 let lookPointer = null;
 let lookLast = { x: 0, y: 0 };
-let lookStart = { x: 0, y: 0, t: 0 };
 
 function pointerMoveLook(dx, dy) {
-  player.yaw -= dx * 0.0032;
-  player.pitch -= dy * 0.003;
+  // Touch gets a larger relative-look multiplier so a broad swipe can rotate
+  // comfortably past 180 degrees. Yaw itself is never clamped.
+  const yawSpeed = isTouch ? 0.0072 : 0.0032;
+  const pitchSpeed = isTouch ? 0.0042 : 0.0030;
+  player.yaw -= dx * yawSpeed;
+  player.pitch -= dy * pitchSpeed;
   player.pitch = THREE.MathUtils.clamp(player.pitch, -1.15, 1.15);
+
+  if (Math.abs(player.yaw) > Math.PI * 12) {
+    player.yaw = Math.atan2(Math.sin(player.yaw), Math.cos(player.yaw));
+  }
 }
 
 renderer.domElement.addEventListener('click', () => {
@@ -1910,24 +1968,35 @@ document.addEventListener('mousemove', (e) => {
 });
 
 document.addEventListener('mousedown', (e) => {
-  if (running && document.pointerLockElement === renderer.domElement && e.button === 0) doAttack();
+  if (!running || document.pointerLockElement !== renderer.domElement) return;
+  if (e.button === 0) doAttack();
+  if (e.button === 2) {
+    e.preventDefault();
+    setBlocking(true);
+  }
+});
+
+document.addEventListener('mouseup', (e) => {
+  if (e.button === 2) setBlocking(false);
+});
+
+document.addEventListener('contextmenu', (e) => {
+  if (running) e.preventDefault();
 });
 
 document.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'KeyE') pickup();
   if (e.code === 'KeyQ' && player.held) throwHeld();
+  if (e.code === 'Space') {
+    e.preventDefault();
+    setBlocking(true);
+  }
 });
 
-document.addEventListener('keyup', (e) => keys.delete(e.code));
-
-const lastAD = { KeyA: 0, KeyD: 0 };
-document.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyA' || e.code === 'KeyD') {
-    const now = performance.now();
-    if (now - lastAD[e.code] < 260) dodge(e.code === 'KeyA' ? -1 : 1);
-    lastAD[e.code] = now;
-  }
+document.addEventListener('keyup', (e) => {
+  keys.delete(e.code);
+  if (e.code === 'Space') setBlocking(false);
 });
 
 movePad.addEventListener('pointerdown', (e) => {
@@ -1963,7 +2032,6 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   if (!running || !isTouch || e.clientX < innerWidth * 0.42) return;
   lookPointer = e.pointerId;
   lookLast = { x: e.clientX, y: e.clientY };
-  lookStart = { x: e.clientX, y: e.clientY, t: performance.now() };
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 
@@ -1977,10 +2045,6 @@ renderer.domElement.addEventListener('pointermove', (e) => {
 
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (e.pointerId !== lookPointer) return;
-  const dx = e.clientX - lookStart.x;
-  const dy = e.clientY - lookStart.y;
-  const elapsed = performance.now() - lookStart.t;
-  if (elapsed < 330 && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.5) dodge(dx < 0 ? -1 : 1);
   lookPointer = null;
 });
 
@@ -1994,6 +2058,18 @@ pickupBtn.addEventListener('pointerdown', (e) => {
   else pickup();
 });
 
+blockBtn?.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  blockBtn.setPointerCapture?.(e.pointerId);
+  setBlocking(true);
+});
+blockBtn?.addEventListener('pointerup', (e) => {
+  e.preventDefault();
+  setBlocking(false);
+});
+blockBtn?.addEventListener('pointercancel', () => setBlocking(false));
+blockBtn?.addEventListener('lostpointercapture', () => setBlocking(false));
+
 function start() {
   if (!characterSources.length) return;
   player.health = 100;
@@ -2003,13 +2079,20 @@ function start() {
   player.pitch = 0;
   player.handSwing = 0;
   player.hitStop = 0;
+  player.blocking = false;
+  blockBtn?.classList.remove('active');
   lowHealthFX.classList.remove('critical');
   lowHealthFX.style.opacity = '0';
   camera.position.set(0, 1.68, 8);
   running = true;
   startScreen.classList.remove('open');
   deathScreen.classList.remove('open');
-  if (!isTouch) setTimeout(() => renderer.domElement.requestPointerLock?.(), 80);
+
+  // Pointer lock must be requested inside the START click gesture. The old
+  // delayed request could be rejected by browsers and make turning feel capped.
+  if (!isTouch) {
+    try { renderer.domElement.requestPointerLock?.(); } catch (_) {}
+  }
 }
 
 startBtn.addEventListener('click', start);
